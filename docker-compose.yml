@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  meridian-platform:
+    build: .
+    container_name: meridian_enterprise_app
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=production
+      - LOG_LEVEL=info
+    restart: unless-stopped

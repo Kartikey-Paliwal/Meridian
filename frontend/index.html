@@ -3,253 +3,566 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MERIDIAN — Federated AI Public Health Supply Chain Platform</title>
-    <!-- Google Fonts -->
+    <title>MERIDIAN — Enterprise Health Supply Chain Intelligence</title>
+    <!-- Google Fonts: Inter & JetBrains Mono -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-    <div class="app-container">
-        <!-- Top Navigation Header -->
-        <header class="top-header">
-            <div class="brand">
-                <div class="logo-icon">🌐</div>
+    <div class="app-layout">
+        
+        <!-- FIXED LEFT SIDEBAR (Linear / Vercel Class) -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="brand-icon">🌐</div>
                 <div>
-                    <h1 class="brand-title">MERIDIAN</h1>
-                    <p class="brand-subtitle">Federated AI Public Health Supply Chain Platform</p>
+                    <span class="brand-name">MERIDIAN</span>
+                    <span class="brand-ver">v1.0</span>
                 </div>
             </div>
-            
-            <div class="header-right">
-                <div class="status-indicator">
-                    <span class="pulse-dot"></span>
-                    <span id="system-status-text">System Live • Localhost MVP</span>
-                </div>
-                <div class="node-badge">
-                    <span>Node: <strong>PHC-001 (Alpha)</strong></span>
-                </div>
+
+            <nav class="sidebar-nav">
+                <div class="nav-section-title">CORE PLATFORM</div>
+                
+                <button class="sidebar-btn active" onclick="switchTab('phc-dashboard', 'PHC Edge Node')">
+                    <div class="sidebar-btn-left">
+                        <span class="icon">🏥</span> PHC Edge Node
+                    </div>
+                </button>
+
+                <button class="sidebar-btn" onclick="switchTab('district-dashboard', 'District Command & Alerts')">
+                    <div class="sidebar-btn-left">
+                        <span class="icon">📊</span> District Command
+                    </div>
+                </button>
+
+                <button class="sidebar-btn" onclick="switchTab('redistribution-panel', 'Redistribution Engine')">
+                    <div class="sidebar-btn-left">
+                        <span class="icon">⚡</span> Redistribution
+                    </div>
+                    <span class="badge-count" id="redist-count-badge">0</span>
+                </button>
+
+                <div class="nav-section-title">INTELLIGENCE & AI</div>
+
+                <button class="sidebar-btn" onclick="switchTab('forecasting-panel', 'AI Forecasting & Math')">
+                    <div class="sidebar-btn-left">
+                        <span class="icon">📈</span> AI Forecasting
+                    </div>
+                </button>
+
+                <button class="sidebar-btn" onclick="switchTab('federated-panel', 'Federated AI (FedAvg)')">
+                    <div class="sidebar-btn-left">
+                        <span class="icon">🧬</span> Federated AI
+                    </div>
+                </button>
+
+                <div class="nav-section-title">NATIONAL & GLOBAL GOVERNANCE</div>
+
+                <button class="sidebar-btn" onclick="switchTab('national-dashboard', 'National Health Command Center')">
+                    <div class="sidebar-btn-left">
+                        <span class="icon">🏛️</span> National Command
+                    </div>
+                </button>
+
+                <button class="sidebar-btn" onclick="switchTab('national-brics-panel', 'BRICS Federated Layer')">
+                    <div class="sidebar-btn-left">
+                        <span class="icon">🌍</span> BRICS Layer
+                    </div>
+                </button>
+
+                <div class="nav-section-title">SECURITY & ENTERPRISE</div>
+
+                <button class="sidebar-btn" onclick="switchTab('privacy-panel', 'Privacy & Encryption')">
+                    <div class="sidebar-btn-left">
+                        <span class="icon">🔒</span> Privacy & Encryption
+                    </div>
+                </button>
+
+                <button class="sidebar-btn" onclick="switchTab('enterprise-panel', 'Enterprise Control Center')">
+                    <div class="sidebar-btn-left">
+                        <span class="icon">🏛️</span> Enterprise Control
+                    </div>
+                    <span class="badge badge-success">Q1-Q4</span>
+                </button>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div>Environment: <strong>Production Local</strong></div>
+                <div style="font-size:0.7rem; color:var(--text-muted); margin-top:2px;">Y Combinator Enterprise Architecture</div>
             </div>
-        </header>
+        </aside>
 
-        <!-- Navigation Tabs -->
-        <nav class="nav-tabs">
-            <button class="nav-btn active" onclick="switchTab('phc-dashboard')">
-                <span class="icon">🏥</span> PHC Edge Node
-            </button>
-            <button class="nav-btn" onclick="switchTab('district-dashboard')">
-                <span class="icon">📊</span> District Command & Alerts
-            </button>
-            <button class="nav-btn" onclick="switchTab('redistribution-panel')">
-                <span class="icon">⚡</span> Redistribution Engine
-                <span class="badge-count" id="redist-count-badge">0</span>
-            </button>
-            <button class="nav-btn" onclick="switchTab('forecasting-panel')">
-                <span class="icon">📈</span> AI Forecasting & Math
-            </button>
-            <button class="nav-btn" onclick="switchTab('federated-panel')">
-                <span class="icon">🧬</span> Federated AI (FedAvg)
-            </button>
-            <button class="nav-btn" onclick="switchTab('national-brics-panel')">
-                <span class="icon">🌍</span> National & BRICS Layer
-            </button>
-            <button class="nav-btn" onclick="switchTab('privacy-panel')">
-                <span class="icon">🔒</span> Privacy & Encryption
-            </button>
-        </nav>
-
-        <!-- MAIN CONTENT AREA -->
-        <main class="main-content">
+        <!-- MAIN WRAPPER (TOP NAV + VIEWPORT) -->
+        <div class="main-wrapper">
             
-            <!-- 1. PHC EDGE DASHBOARD -->
-            <section id="phc-dashboard" class="tab-content active">
-                <div class="section-header">
-                    <h2>Primary Health Centre (PHC) Edge Dashboard</h2>
-                    <div class="phc-selector-group">
-                        <label for="phc-select">Select Active PHC Node:</label>
-                        <select id="phc-select" onchange="loadPHCDashboard(this.value)">
-                            <option value="PHC-001" selected>PHC-001 (Alpha Sector - High Risk)</option>
-                            <option value="PHC-002">PHC-002 (Beta Central - Surplus Donor)</option>
-                            <option value="PHC-003">PHC-003 (Gamma Rural - Brazil Simulated)</option>
-                            <option value="PHC-004">PHC-004 (Delta Community - S. Africa Simulated)</option>
-                        </select>
-                    </div>
+            <!-- TOP NAVBAR -->
+            <header class="top-navbar">
+                <div class="breadcrumb-trail">
+                    <span>Meridian</span>
+                    <span>/</span>
+                    <span class="breadcrumb-active" id="current-tab-title">PHC Edge Node</span>
                 </div>
 
-                <div class="metrics-grid">
-                    <div class="metric-card">
-                        <div class="metric-header">
-                            <span>Total Stock Items</span>
-                            <span class="metric-icon">📦</span>
-                        </div>
-                        <div class="metric-value" id="phc-total-stock">--</div>
-                        <div class="metric-sub" id="phc-critical-count">0 items below 30% par</div>
+                <div class="top-navbar-right">
+                    <div class="status-chip">
+                        <span class="pulse-dot"></span>
+                        <span id="system-status-text">System Live • Enterprise Node</span>
                     </div>
-
-                    <div class="metric-card">
-                        <div class="metric-header">
-                            <span>Bed Occupancy</span>
-                            <span class="metric-icon">🛏️</span>
-                        </div>
-                        <div class="metric-value" id="phc-bed-value">--</div>
-                        <div class="metric-sub" id="phc-bed-sub">--% occupied</div>
-                    </div>
-
-                    <div class="metric-card">
-                        <div class="metric-header">
-                            <span>Staff Present Today</span>
-                            <span class="metric-icon">🩺</span>
-                        </div>
-                        <div class="metric-value" id="phc-staff-value">--</div>
-                        <div class="metric-sub">Fernet Encrypted Identifiers</div>
-                    </div>
-
-                    <div class="metric-card">
-                        <div class="metric-header">
-                            <span>Patient Footfall (7d Avg)</span>
-                            <span class="metric-icon">👥</span>
-                        </div>
-                        <div class="metric-value" id="phc-footfall-value">--</div>
-                        <div class="metric-sub">Daily Average</div>
+                    <div class="node-chip">
+                        <span>Node: <strong>PHC-001 (Alpha)</strong></span>
                     </div>
                 </div>
+            </header>
 
-                <!-- Main Grid: Stock Form & Live Inventory Table -->
-                <div class="content-grid-2col">
-                    <!-- Left: Stock Update & Voice Form -->
-                    <div class="card shadow-sm">
-                        <div class="card-header">
-                            <h3>Update Inventory & Voice Entry</h3>
-                            <button class="voice-btn" id="voice-entry-btn" onclick="toggleVoiceInput()">
-                                <span class="voice-icon">🎙️</span> Speak Update (Web Speech API)
-                            </button>
-                        </div>
-                        <div class="voice-status-box" id="voice-status-box">
-                            Click 'Speak Update' and say e.g., <em>"Update ORS Packets quantity 150"</em>
+            <!-- MAIN VIEW CONTAINER -->
+            <main class="view-content">
+                
+                <!-- 1. PHC EDGE DASHBOARD -->
+                <section id="phc-dashboard" class="tab-content active">
+                    <!-- HEADER BLOCK MATCHING REFERENCE IMAGE -->
+                    <div class="header-row">
+                        <div class="header-title-area">
+                            <span class="eyebrow-tag">SANJEEVANI GRID · PHC LAYER</span>
+                            <h1 class="main-page-title" id="phc-main-title">PHC Rampur — Dashboard</h1>
                         </div>
 
-                        <form id="stock-update-form" onsubmit="handleStockUpdateSubmit(event)" class="form-layout">
-                            <div class="form-group">
-                                <label for="form-phc-id">PHC Node ID</label>
-                                <input type="text" id="form-phc-id" value="PHC-001" readonly class="input-readonly">
-                            </div>
-                            <div class="form-group">
-                                <label for="form-medicine-name">Medicine Name</label>
-                                <select id="form-medicine-name" required>
-                                    <option value="ORS Packets">ORS Packets</option>
-                                    <option value="Paracetamol 500mg">Paracetamol 500mg</option>
-                                    <option value="Amoxicillin 250mg">Amoxicillin 250mg</option>
-                                    <option value="Insulin Vials">Insulin Vials</option>
-                                    <option value="Zinc Supplements">Zinc Supplements</option>
+                        <div style="display:flex; align-items:center; gap:16px;">
+                            <div class="phc-selector-box">
+                                <span style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">ACTIVE NODE:</span>
+                                <select id="phc-select" onchange="loadPHCDashboard(this.value)">
+                                    <option value="PHC-001" selected>PHC Rampur (PHC-001)</option>
+                                    <option value="PHC-002">PHC Beta Central (PHC-002)</option>
+                                    <option value="PHC-003">PHC Gamma Rural (PHC-003)</option>
+                                    <option value="PHC-004">PHC Delta Community (PHC-004)</option>
                                 </select>
                             </div>
-                            <div class="form-group">
-                                <label for="form-quantity">New Stock Quantity</label>
-                                <input type="number" id="form-quantity" required placeholder="e.g. 150" min="0">
+
+                            <div class="date-widget">
+                                <span class="date-label">Today</span>
+                                <span class="date-value" id="current-date-display">Sun, Aug 16</span>
                             </div>
-                            <div class="form-group">
-                                <label for="form-par-level">Par Level Baseline</label>
-                                <input type="number" id="form-par-level" value="100" min="10">
-                            </div>
-                            <button type="submit" class="btn btn-primary btn-block">
-                                💾 Update Database & Refresh Dashboard
-                            </button>
-                        </form>
+                        </div>
                     </div>
 
-                    <!-- Right: Live Inventory Table -->
-                    <div class="card shadow-sm">
-                        <div class="card-header">
-                            <h3>Live PHC Medicine Inventory</h3>
-                            <span class="badge badge-info">Reflects DB Immediately</span>
+                    <!-- 4 METRICS CARDS IN A ROW MATCHING REFERENCE IMAGE -->
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-header-title">MEDICINES AT RISK</div>
+                            <div class="metric-value-row" id="phc-risk-value">
+                                4 <span class="metric-total">of 6</span>
+                            </div>
+                            <div class="metric-subtext critical" id="phc-critical-count">1 critical</div>
                         </div>
-                        <div class="table-responsive">
-                            <table class="table" id="phc-inventory-table">
-                                <thead>
-                                    <tr>
-                                        <th>Medicine Name</th>
-                                        <th>Current Stock</th>
-                                        <th>Par Level</th>
-                                        <th>Status</th>
-                                        <th>Forecast Demand</th>
-                                        <th>Days Cover</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <!-- Populated dynamically -->
-                                </tbody>
-                            </table>
+
+                        <div class="metric-card">
+                            <div class="metric-header-title">BED OCCUPANCY</div>
+                            <div class="metric-value-row" id="phc-bed-value">
+                                14 <span class="metric-total">/ 20</span>
+                            </div>
+                            <div class="metric-subtext" id="phc-bed-sub">70% full</div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-header-title">PATIENTS TODAY</div>
+                            <div class="metric-value-row" id="phc-footfall-today">
+                                47
+                            </div>
+                            <div class="metric-subtext" id="phc-footfall-sub">vs 41 last Sun</div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-header-title">STAFF PRESENT</div>
+                            <div class="metric-value-row" id="phc-staff-value">
+                                7 <span class="metric-total">/ 8</span>
+                            </div>
+                            <div class="metric-subtext" id="phc-staff-sub">1 absent</div>
                         </div>
                     </div>
-                </div>
 
-                <!-- Footfall & Bed Charts -->
-                <div class="content-grid-2col margin-top-lg">
-                    <div class="card shadow-sm">
-                        <div class="card-header">
-                            <h3>Patient Footfall Trend (Last 7 Days)</h3>
-                        </div>
-                        <div class="chart-container">
+                    <!-- PATIENT FOOTFALL — LAST 7 DAYS CARD -->
+                    <div class="full-card">
+                        <div class="card-title-uppercase">PATIENT FOOTFALL — LAST 7 DAYS</div>
+                        <div class="chart-container-large">
                             <canvas id="footfallChart"></canvas>
                         </div>
                     </div>
 
-                    <div class="card shadow-sm">
-                        <div class="card-header">
-                            <h3>Encrypted Staff Attendance Log</h3>
-                            <span class="badge badge-secondary">Fernet Ciphertext</span>
-                        </div>
-                        <div class="table-responsive">
-                            <table class="table table-sm" id="staff-table">
+                    <!-- MEDICINE INVENTORY TABLE CARD -->
+                    <div class="full-card">
+                        <div class="card-title-uppercase">MEDICINE INVENTORY</div>
+                        <div class="inventory-table-container">
+                            <table class="med-table" id="phc-inventory-table">
                                 <thead>
                                     <tr>
-                                        <th>Staff Token (SHA-256)</th>
-                                        <th>Fernet Encrypted Ciphertext</th>
-                                        <th>Status</th>
-                                        <th>Date</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <!-- Populated dynamically -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- 2. DISTRICT COMMAND DASHBOARD -->
-            <section id="district-dashboard" class="tab-content">
-                <div class="section-header">
-                    <h2>District Aggregation Command Center</h2>
-                    <span class="badge badge-primary">District-North Rollup</span>
-                </div>
-
-                <div class="alert-banner alert-warning" id="district-warning-banner">
-                    <div class="banner-icon">⚠️</div>
-                    <div>
-                        <strong>PAR LEVEL ALERT:</strong> <span id="warning-count-text">Scanning district inventory...</span>
-                    </div>
-                </div>
-
-                <div class="content-grid-2col margin-top-lg">
-                    <div class="card shadow-sm">
-                        <div class="card-header">
-                            <h3>Medicine Par-Level Flags (< 30% Par Threshold)</h3>
-                        </div>
-                        <div class="table-responsive">
-                            <table class="table" id="district-warnings-table">
-                                <thead>
-                                    <tr>
-                                        <th>PHC Node</th>
                                         <th>Medicine</th>
-                                        <th>Current Stock</th>
-                                        <th>Par Baseline</th>
-                                        <th>% of Par</th>
-                                        <th>Alert Status</th>
+                                        <th>Stock</th>
+                                        <th>Par level</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Populated dynamically by app.js -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- RECORD NEW STOCK RECEIVED CARD -->
+                    <div class="record-stock-card">
+                        <div class="card-title-uppercase" style="display:flex; justify-content:space-between; align-items:center;">
+                            <span>RECORD NEW STOCK RECEIVED</span>
+                            <button class="voice-btn" id="voice-entry-btn" onclick="toggleVoiceInput()">
+                                <span>🎙️</span> Speak Update
+                            </button>
+                        </div>
+
+                        <div class="voice-status-box" id="voice-status-box" style="display:none;">
+                            Listening... Speak e.g., <em>"Update ORS Packets quantity 150"</em>
+                        </div>
+
+                        <form id="stock-update-form" onsubmit="handleStockUpdateSubmit(event)">
+                            <input type="hidden" id="form-phc-id" value="PHC-001">
+                            <div class="stock-input-row">
+                                <div>
+                                    <select id="form-medicine-name" class="clean-input" required>
+                                        <option value="" disabled selected>Medicine name</option>
+                                        <option value="ORS Packets">ORS Packets</option>
+                                        <option value="Paracetamol 500mg">Paracetamol 500mg</option>
+                                        <option value="Amoxicillin 250mg">Amoxicillin 250mg</option>
+                                        <option value="IV fluids (RL)">IV fluids (RL)</option>
+                                        <option value="Iron folic acid">Iron folic acid</option>
+                                        <option value="Chlorine tablets">Chlorine tablets</option>
+                                        <option value="Insulin Vials">Insulin Vials</option>
+                                        <option value="Zinc Supplements">Zinc Supplements</option>
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <input type="number" id="form-quantity" class="clean-input" placeholder="Quantity" min="0" required>
+                                </div>
+
+                                <div>
+                                    <input type="number" id="form-par-level" class="clean-input" placeholder="Par level" value="800" min="10">
+                                </div>
+
+                                <div>
+                                    <button type="submit" class="btn-teal">
+                                        Record Stock
+                                    </button>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+
+                    <!-- NURSE & STAFF ATTENDANCE HUB — RFID SMART CARD & KIOSK TERMINAL -->
+                    <div class="full-card margin-top-lg rfid-hub-card">
+                        <div class="card-title-uppercase" style="display:flex; justify-content:space-between; align-items:center;">
+                            <div style="display:flex; align-items:center; gap:10px;">
+                                <span>🎴 NURSE & STAFF ATTENDANCE PORTAL</span>
+                                <span class="badge badge-primary">RFID / Smart Card Enabled</span>
+                            </div>
+                            <span class="badge badge-info">Fernet Field Encryption Active</span>
+                        </div>
+
+                        <div class="attendance-grid-2col margin-top-md">
+                            <!-- LEFT COLUMN: RFID HARDWARE TERMINAL SIMULATOR -->
+                            <div class="terminal-box">
+                                <div class="terminal-header">
+                                    <div class="terminal-brand">
+                                        <span class="led-ring blue" id="terminal-led"></span>
+                                        <strong>MERIDIAN RFID CARD READER v2.4</strong>
+                                    </div>
+                                    <span class="terminal-id-tag">TERMINAL-PHC-GATE1</span>
+                                </div>
+
+                                <div class="terminal-screen" id="terminal-screen-display">
+                                    <div class="screen-clock" id="terminal-screen-clock">08:30:00 AM</div>
+                                    <div class="screen-subtext" id="terminal-screen-msg">TAP RFID CARD / BADGE TO PUNCH ATTENDANCE</div>
+                                </div>
+
+                                <!-- HARDWARE CARD INPUT SIMULATOR -->
+                                <div class="terminal-input-group">
+                                    <input type="text" id="rfid-input-field" class="terminal-input" placeholder="Scan or Type Card UID (e.g. RFID-10101)..." onkeydown="if(event.key==='Enter') triggerCardScanInput()">
+                                    <button class="btn-punch-scan" onclick="triggerCardScanInput()">⚡ SCAN CARD</button>
+                                </div>
+
+                                <!-- QUICK TAP STAFF RFID BADGES -->
+                                <div class="quick-badges-wrapper">
+                                    <div class="quick-badges-title">DEMO QUICK-TAP SMART CARDS (NURSES & STAFF):</div>
+                                    <div class="quick-badges-grid" id="rfid-quick-badges">
+                                        <!-- Injected by app.js -->
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- RIGHT COLUMN: MANUAL NURSE & EMPLOYEE ATTENDANCE KIOSK -->
+                            <div class="kiosk-box">
+                                <div class="kiosk-header">
+                                    <h3>📋 Employee & Nurse Kiosk Check-In</h3>
+                                    <span class="badge badge-secondary">Manual Fallback</span>
+                                </div>
+
+                                <form id="kiosk-attendance-form" onsubmit="handleManualAttendanceSubmit(event)" style="display:flex; flex-direction:column; gap:12px; margin-top:10px;">
+                                    <div>
+                                        <label class="form-label">Select Staff Member / Nurse:</label>
+                                        <select id="kiosk-staff-select" class="clean-input" required>
+                                            <option value="" disabled selected>Loading staff roster...</option>
+                                        </select>
+                                    </div>
+
+                                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                                        <div>
+                                            <label class="form-label">Attendance Status:</label>
+                                            <select id="kiosk-status-select" class="clean-input">
+                                                <option value="CHECKED_IN">Checked In (Present)</option>
+                                                <option value="CHECKED_OUT">Checked Out</option>
+                                                <option value="ABSENT">Absent / On Leave</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label class="form-label">Shift / Department:</label>
+                                            <select id="kiosk-shift-select" class="clean-input">
+                                                <option value="Morning Shift (08:00 - 16:00)">Morning Shift</option>
+                                                <option value="Evening Shift (16:00 - 00:00)">Evening Shift</option>
+                                                <option value="Night Shift (00:00 - 08:00)">Night Shift</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label class="form-label">Verification Method:</label>
+                                        <select id="kiosk-method-select" class="clean-input">
+                                            <option value="Manual Kiosk Check-in">Manual Kiosk Check-in</option>
+                                            <option value="Biometric Fingerprint">Biometric Fingerprint Scanner</option>
+                                            <option value="Facial Recognition Kiosk">Facial Recognition Kiosk</option>
+                                        </select>
+                                    </div>
+
+                                    <button type="submit" class="btn-teal" style="margin-top:4px;">
+                                        Confirm & Submit Attendance
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+
+                        <!-- LIVE ATTENDANCE ROSTER & ENCRYPTED AUDIT LOG -->
+                        <div class="margin-top-lg">
+                            <div class="card-title-uppercase" style="font-size:0.8rem; font-weight:700; color:var(--text-secondary); margin-bottom:8px;">
+                                LIVE ATTENDANCE ROSTER & PRIVACY ENCRYPTED AUDIT LOG
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table table-sm" id="staff-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Staff Member & Role</th>
+                                            <th>Card UID</th>
+                                            <th>Status & Shift</th>
+                                            <th>Punch In / Out</th>
+                                            <th>Verification Method</th>
+                                            <th>Fernet Ciphertext (Encrypted ID)</th>
+                                            <th>SHA-256 Token</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- Populated dynamically -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 2. DISTRICT COMMAND DASHBOARD -->
+                <section id="district-dashboard" class="tab-content">
+                    <div class="view-header">
+                        <h2>District AI Command Center & Emergency Logistics Hub</h2>
+                        <div style="display:flex; gap:8px;">
+                            <span class="badge badge-info">District-North Rollup</span>
+                            <span class="badge badge-primary">Differential Privacy ε=0.5</span>
+                        </div>
+                    </div>
+
+                    <!-- USER FEATURE: AUTOMATED EMERGENCY LOGISTICS & NEAREST SURPLUS DISPATCH CONTROLLER -->
+                    <div class="emergency-dispatch-banner margin-top-md" id="emergency-dispatch-banner">
+                        <div class="dispatch-header">
+                            <div class="dispatch-title">
+                                <span class="alert-pulse">🚨</span>
+                                <div>
+                                    <strong style="font-size:1.05rem; color:#DC2626;">CRITICAL EMERGENCY STOCKOUT ALERT & NEAREST DONOR MATCH</strong>
+                                    <div style="font-size:0.8rem; color:#7F1D1D; margin-top:2px;">
+                                        System matched high-risk PHC to nearest donor with surplus inventory via automated GIS distance matrix.
+                                    </div>
+                                </div>
+                            </div>
+                            <span class="badge badge-danger">AUTOMATED DISPATCH READY</span>
+                        </div>
+
+                        <div class="dispatch-grid-3col margin-top-sm">
+                            <div class="dispatch-card shortage">
+                                <div class="card-label">TARGET EMERGENCY NODE</div>
+                                <div class="node-name" id="disp-target-phc">PHC Rampur (PHC-001)</div>
+                                <div class="med-status" id="disp-shortage-item">ORS Packets: <strong>15 units left</strong> (< 30% Par)</div>
+                            </div>
+
+                            <div class="dispatch-card donor">
+                                <div class="card-label">NEAREST SURPLUS DONOR</div>
+                                <div class="node-name" id="disp-source-phc">PHC Beta Central (PHC-002)</div>
+                                <div class="med-status" id="disp-donor-stock">Surplus Stock: <strong>320 units available</strong></div>
+                            </div>
+
+                            <div class="dispatch-card route">
+                                <div class="card-label">TRANSIT ROUTE & ETA MATRIX</div>
+                                <div class="route-info" id="disp-matrix-info">Distance: <strong>12.4 km</strong> | Fleet ETA: <strong>18 mins</strong></div>
+                                <div class="cost-tag" id="disp-fleet-tag">Standard Health Logistics · Cost: $31.88</div>
+                            </div>
+                        </div>
+
+                        <div class="dispatch-action-row margin-top-sm">
+                            <button class="btn-emergency-dispatch" onclick="triggerEmergencyDispatch('PHC-002', 'PHC-001', 'ORS Packets', 160)">
+                                ⚡ ONE-CLICK EMERGENCY DISPATCH & NOTIFY NEAREST SURPLUS PHC
+                            </button>
+                            <span class="dispatch-note">Notifies both PHC Medical Officers & locks stock allocation in real time.</span>
+                        </div>
+                    </div>
+
+                    <!-- OUTBREAK RADAR & DISTRICT STAFFING ROW -->
+                    <div class="content-grid-2col margin-top-lg">
+                        <!-- OUTBREAK EARLY WARNING RADAR -->
+                        <div class="card shadow-sm border-purple">
+                            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+                                <h3>📡 District Outbreak Early Warning Radar</h3>
+                                <span class="badge badge-purple" id="outbreak-probability-badge">84.5% Risk</span>
+                            </div>
+                            <div class="outbreak-body" id="outbreak-radar-body">
+                                <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px;">
+                                    <div class="outbreak-score-circle">84%</div>
+                                    <div>
+                                        <div style="font-weight:700; color:var(--text-primary); font-size:0.95rem;">High Diarrheal Outbreak Risk</div>
+                                        <div style="font-size:0.8rem; color:var(--text-muted);">Spiking ORS (+85%) & footfall (+120%) in Sector-1</div>
+                                    </div>
+                                </div>
+                                <div class="code-block" style="font-size:0.75rem;">
+                                    Vector: Monsoonal Contamination (Sector-1)<br>
+                                    Intervention: Pre-deploy 160 ORS packets to PHC-001.
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- DISTRICT-WIDE STAFFING & NURSE RADAR -->
+                        <div class="card shadow-sm border-teal">
+                            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+                                <h3>🎴 District Staffing & Nurse Availability Radar</h3>
+                                <span class="badge badge-success" id="district-staff-badge">83% On Duty</span>
+                            </div>
+                            <div id="district-staff-body" style="padding:10px 0;">
+                                <div style="display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:8px;">
+                                    <span>Total District Staff Members:</span>
+                                    <strong id="dist-total-staff">12 Registered</strong>
+                                </div>
+                                <div style="display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:8px;">
+                                    <span>Currently Checked In (RFID Cards):</span>
+                                    <strong id="dist-checkedin-staff" style="color:var(--accent-teal);">10 On Duty</strong>
+                                </div>
+                                <div class="alert-banner alert-warning" style="padding:8px 12px; font-size:0.8rem; margin-top:8px;">
+                                    <span>⚠️ <strong>PHC Rampur:</strong> Lab Technician absent today. Nurse Anita Sharma on duty.</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- GIS SPATIAL HEALTH NODE NETWORK -->
+                    <div class="card shadow-sm margin-top-lg">
+                        <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+                            <h3>🗺️ GIS District Health Node Spatial Network</h3>
+                            <span class="badge badge-info">4 PHC Nodes Active</span>
+                        </div>
+                        <div class="gis-grid-4col" id="gis-nodes-container">
+                            <!-- Populated dynamically by app.js -->
+                        </div>
+                    </div>
+
+                    <!-- PAR LEVEL WARNINGS & DIFFERENTIAL PRIVACY SUMMARY -->
+                    <div class="content-grid-2col margin-top-lg">
+                        <div class="card shadow-sm">
+                            <div class="card-header">
+                                <h3>Medicine Par-Level Flags (< 30% Par Threshold)</h3>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table" id="district-warnings-table">
+                                    <thead>
+                                        <tr>
+                                            <th>PHC Node</th>
+                                            <th>Medicine</th>
+                                            <th>Current Stock</th>
+                                            <th>Par Baseline</th>
+                                            <th>% of Par</th>
+                                            <th>Alert Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <!-- Populated dynamically -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="card shadow-sm">
+                            <div class="card-header">
+                                <h3>District Aggregate Totals & Privacy Noise</h3>
+                            </div>
+                            <div id="district-summary-metrics" class="dp-box">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 3. REDISTRIBUTION ENGINE (HUMAN-IN-THE-LOOP) -->
+                <section id="redistribution-panel" class="tab-content">
+                    <div class="view-header">
+                        <h2>Explainable Resource Redistribution Engine</h2>
+                        <span class="badge badge-success">Human-in-the-Loop Mode</span>
+                    </div>
+
+                    <div class="info-card">
+                        <div class="info-icon">💡</div>
+                        <div>
+                            <strong>Human-in-the-Loop Protocol:</strong> Recommendations are generated by comparing predicted shortage PHCs against surplus donor PHCs. 
+                            <strong>No transfer is executed automatically.</strong> Every recommendation presents underlying calculation numbers for human audit before approval.
+                        </div>
+                    </div>
+
+                    <div class="card shadow-sm margin-top-lg">
+                        <div class="card-header">
+                            <h3>Active Transfer Recommendations</h3>
+                            <button class="btn btn-outline" onclick="loadRedistributionRecommendations()">🔄 Refresh Engine</button>
+                        </div>
+                        <div id="recommendations-container" class="recommendations-list">
+                            <!-- Recommendation cards injected here -->
+                        </div>
+                    </div>
+
+                    <div class="card shadow-sm margin-top-lg">
+                        <div class="card-header">
+                            <h3>Transfer Audit History Log</h3>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table" id="transfer-history-table">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Source Donor</th>
+                                        <th>Target PHC</th>
+                                        <th>Medicine</th>
+                                        <th>Quantity</th>
+                                        <th>ETA</th>
+                                        <th>Status</th>
+                                        <th>Timestamp</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -258,235 +571,403 @@
                             </table>
                         </div>
                     </div>
+                </section>
+
+                <!-- 4. DEMAND FORECASTING & EXPLAINABILITY -->
+                <section id="forecasting-panel" class="tab-content">
+                    <div class="view-header">
+                        <h2>NumPy Linear Regression Demand Forecasting</h2>
+                        <span class="badge badge-info">No External ML Libs</span>
+                    </div>
+
+                    <div class="content-grid-2col">
+                        <div class="card shadow-sm">
+                            <div class="card-header">
+                                <h3>Forecast Selector</h3>
+                            </div>
+                            <div class="form-layout">
+                                <div class="form-group">
+                                    <label>Select PHC Node:</label>
+                                    <select id="forecast-phc-select" onchange="updateForecastView()">
+                                        <option value="PHC-001">PHC-001 (Alpha Sector)</option>
+                                        <option value="PHC-002">PHC-002 (Beta Central)</option>
+                                        <option value="PHC-003">PHC-003 (Gamma Rural)</option>
+                                        <option value="PHC-004">PHC-004 (Delta Community)</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label>Select Medicine:</label>
+                                    <select id="forecast-med-select" onchange="updateForecastView()">
+                                        <option value="ORS Packets">ORS Packets</option>
+                                        <option value="Paracetamol 500mg">Paracetamol 500mg</option>
+                                        <option value="Amoxicillin 250mg">Amoxicillin 250mg</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="chart-container margin-top-md">
+                                <canvas id="forecastChart"></canvas>
+                            </div>
+                        </div>
+
+                        <!-- Right: Math Explainability Panel -->
+                        <div class="card shadow-sm">
+                            <div class="card-header">
+                                <h3>Underlying Math & Explainability Panel</h3>
+                            </div>
+                            <div id="explainability-box" class="explainability-container">
+                                <!-- Formula & parameters injected here -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- STAFF ACTION DIRECTIVES & PRESCRIPTIVE GUIDANCE CARD (USER REQUIREMENT) -->
+                    <div class="full-card margin-top-lg staff-guidance-card" id="staff-guidance-card">
+                        <div class="card-title-uppercase" style="display:flex; justify-content:space-between; align-items:center;">
+                            <div style="display:flex; align-items:center; gap:10px;">
+                                <span>📋 CLINIC STAFF ACTION DIRECTIVES & PRESCRIPTIVE ADVICE</span>
+                                <span class="badge badge-warning" id="staff-directive-badge">ACTION DIRECTIVE</span>
+                            </div>
+                            <span class="badge badge-info">Automated Staff Decision Support</span>
+                        </div>
+
+                        <div class="staff-directive-box margin-top-md" id="staff-directive-box">
+                            <div class="directive-text" id="staff-directive-text">
+                                Loading AI staff operational directives...
+                            </div>
+                        </div>
+
+                        <!-- ONE-CLICK STAFF ACTION BUTTONS -->
+                        <div class="staff-action-buttons-row margin-top-md">
+                            <button class="btn-action-primary" id="btn-submit-requisition" onclick="handleStaffRequisitionSubmit()">
+                                📦 Submit Requisition Order to Central Warehouse
+                            </button>
+                            <button class="btn-action-warning" onclick="handleEmergencyTransferTrigger()">
+                                ⚡ Request Emergency Inter-PHC Stock Transfer
+                            </button>
+                            <button class="btn-action-info" onclick="handleBroadcastNurseAlert()">
+                                📢 Broadcast Supply Alert to Ward Nurses & Duty Staff
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 7-DAY STOCK DEPLETION FORWARD TIMELINE TABLE -->
+                    <div class="full-card margin-top-lg">
+                        <div class="card-title-uppercase" style="display:flex; justify-content:space-between; align-items:center;">
+                            <span>🗓️ 7-DAY STOCK DEPLETION FORWARD TIMELINE</span>
+                            <span class="badge badge-secondary">Predictive Depletion Countdown</span>
+                        </div>
+                        <div class="table-responsive margin-top-md">
+                            <table class="table table-sm" id="depletion-timeline-table">
+                                <thead>
+                                    <tr>
+                                        <th>Forecast Projection Step</th>
+                                        <th>Predicted Daily Usage</th>
+                                        <th>Projected Stock Balance</th>
+                                        <th>Depletion Status</th>
+                                        <th>Staff Action Threshold</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Populated dynamically by app.js -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 5. FEDERATED LEARNING PANEL (FedAvg) -->
+                <section id="federated-panel" class="tab-content">
+                    <div class="view-header">
+                        <h2>Federated Learning Demo (3-Node NumPy FedAvg)</h2>
+                        <button class="btn btn-primary" onclick="triggerFederatedTraining()">▶ Run Federated Training & Aggregation</button>
+                    </div>
+
+                    <div class="info-card">
+                        <div class="info-icon">🔒</div>
+                        <div>
+                            <strong>Data Sovereignty Architecture:</strong> Each PHC trains its local <code>np.polyfit</code> model on its local consumption array. 
+                            <strong>Only model weights [slope, intercept] leave the node.</strong> The central server executes <code>np.mean(weights, axis=0)</code> to produce the Global Model.
+                        </div>
+                    </div>
+
+                    <div class="fl-grid margin-top-lg">
+                        <div class="fl-card" id="fl-node1-card">
+                            <div class="fl-node-header">
+                                <span>PHC Node 1 (Alpha)</span>
+                                <span class="badge badge-info">Local Model</span>
+                            </div>
+                            <div class="fl-weights" id="node1-weights">Loading...</div>
+                            <div class="fl-data-tag">Raw patient records: <strong>Kept Local</strong></div>
+                        </div>
+
+                        <div class="fl-card" id="fl-node2-card">
+                            <div class="fl-node-header">
+                                <span>PHC Node 2 (Beta)</span>
+                                <span class="badge badge-info">Local Model</span>
+                            </div>
+                            <div class="fl-weights" id="node2-weights">Loading...</div>
+                            <div class="fl-data-tag">Raw patient records: <strong>Kept Local</strong></div>
+                        </div>
+
+                        <div class="fl-card" id="fl-node3-card">
+                            <div class="fl-node-header">
+                                <span>PHC Node 3 (Gamma)</span>
+                                <span class="badge badge-info">Local Model</span>
+                            </div>
+                            <div class="fl-weights" id="node3-weights">Loading...</div>
+                            <div class="fl-data-tag">Raw patient records: <strong>Kept Local</strong></div>
+                        </div>
+                    </div>
+
+                    <div class="card shadow-sm margin-top-lg highlight-card">
+                        <div class="card-header">
+                            <h3>Averaged Global Model (FedAvg Aggregator)</h3>
+                            <span class="badge badge-success">np.mean(weights)</span>
+                        </div>
+                        <div class="global-model-body" id="global-model-box">
+                            <!-- Injected dynamically -->
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 6. NATIONAL HEALTH COMMAND CENTER -->
+                <section id="national-dashboard" class="tab-content">
+                    <div class="header-row">
+                        <div class="header-title-area">
+                            <span class="eyebrow-tag">MINISTRY OF HEALTH · NATIONAL GOVERNANCE LAYER</span>
+                            <h1 class="main-page-title">National Health Command Center</h1>
+                        </div>
+
+                        <div style="display:flex; align-items:center; gap:16px;">
+                            <div class="date-widget">
+                                <span class="date-label">National Rollup</span>
+                                <span class="date-value">Active Governance</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 4 METRICS CARDS MATCHING PHC DASHBOARD THEME -->
+                    <div class="metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-header-title">NATIONAL PHC NODES</div>
+                            <div class="metric-value-row" id="nat-nodes-value">
+                                4 <span class="metric-total">Active</span>
+                            </div>
+                            <div class="metric-subtext" style="color:var(--accent-teal);" id="nat-nodes-sub">100% Online</div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-header-title">NATIONAL BED CAPACITY</div>
+                            <div class="metric-value-row" id="nat-beds-value">
+                                76 <span class="metric-total">/ 130</span>
+                            </div>
+                            <div class="metric-subtext" id="nat-beds-sub">58.5% Occupied</div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-header-title">TOTAL MEDICINES IN STOCK</div>
+                            <div class="metric-value-row" id="nat-meds-value">
+                                1,850 <span class="metric-total">units</span>
+                            </div>
+                            <div class="metric-subtext" id="nat-meds-sub">4 Essential Categories</div>
+                        </div>
+
+                        <div class="metric-card">
+                            <div class="metric-header-title">NATIONAL CRITICAL ALERTS</div>
+                            <div class="metric-value-row" id="nat-alerts-value">
+                                2 <span class="metric-total">shortages</span>
+                            </div>
+                            <div class="metric-subtext critical" id="nat-alerts-sub">Action required</div>
+                        </div>
+                    </div>
+
+                    <!-- NATIONAL STRATEGIC RESERVE TABLE CARD -->
+                    <div class="full-card margin-top-lg">
+                        <div class="card-title-uppercase" style="display:flex; justify-content:space-between; align-items:center;">
+                            <span>NATIONAL STRATEGIC RESERVE & ESSENTIAL MEDICINES TRACKER</span>
+                            <span class="badge badge-info">Ministry of Health Policy</span>
+                        </div>
+                        <div class="table-responsive margin-top-md">
+                            <table class="table" id="national-strategic-reserve-table">
+                                <thead>
+                                    <tr>
+                                        <th>Essential Medicine</th>
+                                        <th>National Aggregate Stock</th>
+                                        <th>National Par Baseline</th>
+                                        <th>National Cover %</th>
+                                        <th>Reserve Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Populated dynamically by app.js -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- INTER-DISTRICT SUPPLY ALLOCATION & LOGISTICS LOG -->
+                    <div class="full-card margin-top-lg">
+                        <div class="card-title-uppercase" style="display:flex; justify-content:space-between; align-items:center;">
+                            <span>NATIONAL INTER-DISTRICT SUPPLY ALLOCATION & TRANSFERS</span>
+                            <span class="badge badge-primary">Audit Trail</span>
+                        </div>
+                        <div class="table-responsive margin-top-md">
+                            <table class="table" id="national-transfers-table">
+                                <thead>
+                                    <tr>
+                                        <th>Transfer ID</th>
+                                        <th>Donor PHC / Region</th>
+                                        <th>Recipient Target</th>
+                                        <th>Medicine</th>
+                                        <th>Quantity</th>
+                                        <th>Transit ETA</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <!-- Populated dynamically by app.js -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 7. BRICS SIMULATION PANEL -->
+                <section id="national-brics-panel" class="tab-content">
+                    <div class="view-header">
+                        <h2>National Command Dashboard & BRICS Simulation</h2>
+                        <span class="badge badge-simulated">BRICS Simulation Mode</span>
+                    </div>
+
+                    <div class="alert-banner alert-simulated">
+                        <div class="banner-icon">🌐</div>
+                        <div>
+                            <strong>HONEST SIMULATION LABEL:</strong> Nodes 3 & 4 are relabelled as partner nations (Brazil & South Africa) to demonstrate cross-border federated aggregation without actual cross-border network deployments.
+                        </div>
+                    </div>
+
+                    <div class="brics-grid margin-top-lg" id="brics-nodes-container">
+                        <!-- BRICS node cards injected here -->
+                    </div>
+                </section>
+
+                <!-- 7. PRIVACY & ENCRYPTION INSPECTOR -->
+                <section id="privacy-panel" class="tab-content">
+                    <div class="view-header">
+                        <h2>Privacy Layer & Field Encryption Inspector</h2>
+                    </div>
 
                     <div class="card shadow-sm">
                         <div class="card-header">
-                            <h3>District Aggregate Totals & Privacy Noise</h3>
-                        </div>
-                        <div id="district-summary-metrics" class="dp-box">
-                            <!-- Populated dynamically -->
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- 3. REDISTRIBUTION ENGINE (HUMAN-IN-THE-LOOP) -->
-            <section id="redistribution-panel" class="tab-content">
-                <div class="section-header">
-                    <h2>Explainable Resource Redistribution Engine</h2>
-                    <span class="badge badge-success">Human-in-the-Loop Mode</span>
-                </div>
-
-                <div class="info-card">
-                    <div class="info-icon">💡</div>
-                    <div>
-                        <strong>Human-in-the-Loop Protocol:</strong> Recommendations are generated by comparing predicted shortage PHCs against surplus donor PHCs. 
-                        <strong>No transfer is executed automatically.</strong> Every recommendation presents underlying calculation numbers for human audit before approval.
-                    </div>
-                </div>
-
-                <div class="card shadow-sm margin-top-lg">
-                    <div class="card-header">
-                        <h3>Active Transfer Recommendations</h3>
-                        <button class="btn btn-outline" onclick="loadRedistributionRecommendations()">🔄 Refresh Engine</button>
-                    </div>
-                    <div id="recommendations-container" class="recommendations-list">
-                        <!-- Recommendation cards injected here -->
-                    </div>
-                </div>
-
-                <div class="card shadow-sm margin-top-lg">
-                    <div class="card-header">
-                        <h3>Transfer Audit History Log</h3>
-                    </div>
-                    <div class="table-responsive">
-                        <table class="table" id="transfer-history-table">
-                            <thead>
-                                <tr>
-                                    <th>ID</th>
-                                    <th>Source Donor</th>
-                                    <th>Target PHC</th>
-                                    <th>Medicine</th>
-                                    <th>Quantity</th>
-                                    <th>ETA</th>
-                                    <th>Status</th>
-                                    <th>Timestamp</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <!-- Populated dynamically -->
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </section>
-
-            <!-- 4. DEMAND FORECASTING & EXPLAINABILITY -->
-            <section id="forecasting-panel" class="tab-content">
-                <div class="section-header">
-                    <h2>NumPy Linear Regression Demand Forecasting</h2>
-                    <span class="badge badge-accent">No External ML Libs</span>
-                </div>
-
-                <div class="content-grid-2col">
-                    <div class="card shadow-sm">
-                        <div class="card-header">
-                            <h3>Forecast Selector</h3>
+                            <h3>Interactive Encryption & Differential Privacy Test</h3>
                         </div>
                         <div class="form-layout">
                             <div class="form-group">
-                                <label>Select PHC Node:</label>
-                                <select id="forecast-phc-select" onchange="updateForecastView()">
-                                    <option value="PHC-001">PHC-001 (Alpha Sector)</option>
-                                    <option value="PHC-002">PHC-002 (Beta Central)</option>
-                                    <option value="PHC-003">PHC-003 (Gamma Rural)</option>
-                                    <option value="PHC-004">PHC-004 (Delta Community)</option>
-                                </select>
+                                <label for="privacy-input">Enter Sensitive Staff or Patient ID:</label>
+                                <input type="text" id="privacy-input" value="STF-DOCTOR-8842" placeholder="e.g. STF-101">
                             </div>
-                            <div class="form-group">
-                                <label>Select Medicine:</label>
-                                <select id="forecast-med-select" onchange="updateForecastView()">
-                                    <option value="ORS Packets">ORS Packets</option>
-                                    <option value="Paracetamol 500mg">Paracetamol 500mg</option>
-                                    <option value="Amoxicillin 250mg">Amoxicillin 250mg</option>
-                                </select>
+                            <button class="btn btn-primary" onclick="testPrivacyLayer()">🔐 Test Encryption & Noise</button>
+                        </div>
+
+                        <div id="privacy-results" class="margin-top-lg" style="display: none;">
+                            <div class="privacy-result-card">
+                                <h4>1. Fernet Symmetric Field Encryption</h4>
+                                <div class="code-block" id="res-encrypted">--</div>
+                            </div>
+
+                            <div class="privacy-result-card margin-top-md">
+                                <h4>2. Decryption Verification</h4>
+                                <div class="code-block" id="res-decrypted">--</div>
+                            </div>
+
+                            <div class="privacy-result-card margin-top-md">
+                                <h4>3. SHA-256 Tokenization (Public Identifier)</h4>
+                                <div class="code-block" id="res-token">--</div>
+                            </div>
+
+                            <div class="privacy-result-card margin-top-md">
+                                <h4>4. Differential Privacy Noise Simulation (Aggregate Counts)</h4>
+                                <div class="code-block" id="res-dp">--</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 8. ENTERPRISE CONTROL CENTER (Q1-Q4 ROADMAP) -->
+                <section id="enterprise-panel" class="tab-content">
+                    <div class="view-header">
+                        <h2>Enterprise Platform Control Center (Q1–Q4 Roadmap)</h2>
+                        <span class="badge badge-success">Production Ready</span>
+                    </div>
+
+                    <div class="content-grid-2col">
+                        <!-- Q1: 30-Day Shadow Pilot & Backtester -->
+                        <div class="card shadow-sm">
+                            <div class="card-header">
+                                <h3>Q1: 30-Day Shadow Pilot Simulator & MAE/RMSE Backtest</h3>
+                                <button class="btn btn-primary" onclick="runShadowPilotSimulation()">▶ Run 30-Day Backtest</button>
+                            </div>
+                            <div id="shadow-pilot-results" class="code-block">
+                                Click 'Run 30-Day Backtest' to execute rolling linear forecast simulation against 30-day ground-truth usage.
                             </div>
                         </div>
 
-                        <div class="chart-container margin-top-md">
-                            <canvas id="forecastChart"></canvas>
+                        <!-- Q3: HL7 FHIR Interoperability -->
+                        <div class="card shadow-sm">
+                            <div class="card-header">
+                                <h3>Q3: HL7 FHIR R4 Bundle Exporter (ABDM Stack)</h3>
+                                <button class="btn btn-outline" onclick="exportFHIRBundle()">📥 Export FHIR JSON</button>
+                            </div>
+                            <div id="fhir-export-results" class="code-block" style="max-height: 200px; overflow-y: auto;">
+                                Click 'Export FHIR JSON' to generate HL7 FHIR R4 MedicationStatement Bundle.
+                            </div>
                         </div>
                     </div>
 
-                    <!-- Right: Math Explainability Panel -->
-                    <div class="card shadow-sm">
-                        <div class="card-header">
-                            <h3>Underlying Math & Explainability Panel</h3>
-                        </div>
-                        <div id="explainability-box" class="explainability-container">
-                            <!-- Formula & parameters injected here -->
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- 5. FEDERATED LEARNING PANEL (FedAvg) -->
-            <section id="federated-panel" class="tab-content">
-                <div class="section-header">
-                    <h2>Federated Learning Demo (3-Node NumPy FedAvg)</h2>
-                    <button class="btn btn-primary" onclick="triggerFederatedTraining()">▶ Run Federated Training & Aggregation</button>
-                </div>
-
-                <div class="info-card">
-                    <div class="info-icon">🔒</div>
-                    <div>
-                        <strong>Data Sovereignty Architecture:</strong> Each PHC trains its local <code>np.polyfit</code> model on its local consumption array. 
-                        <strong>Only model weights [slope, intercept] leave the node.</strong> The central server executes <code>np.mean(weights, axis=0)</code> to produce the Global Model.
-                    </div>
-                </div>
-
-                <div class="fl-grid margin-top-lg">
-                    <div class="fl-card" id="fl-node1-card">
-                        <div class="fl-node-header">
-                            <span>PHC Node 1 (Alpha)</span>
-                            <span class="badge badge-info">Local Model</span>
-                        </div>
-                        <div class="fl-weights" id="node1-weights">Loading...</div>
-                        <div class="fl-data-tag">Raw patient records: <strong>Kept Local</strong></div>
-                    </div>
-
-                    <div class="fl-card" id="fl-node2-card">
-                        <div class="fl-node-header">
-                            <span>PHC Node 2 (Beta)</span>
-                            <span class="badge badge-info">Local Model</span>
-                        </div>
-                        <div class="fl-weights" id="node2-weights">Loading...</div>
-                        <div class="fl-data-tag">Raw patient records: <strong>Kept Local</strong></div>
-                    </div>
-
-                    <div class="fl-card" id="fl-node3-card">
-                        <div class="fl-node-header">
-                            <span>PHC Node 3 (Gamma)</span>
-                            <span class="badge badge-info">Local Model</span>
-                        </div>
-                        <div class="fl-weights" id="node3-weights">Loading...</div>
-                        <div class="fl-data-tag">Raw patient records: <strong>Kept Local</strong></div>
-                    </div>
-                </div>
-
-                <div class="card shadow-sm margin-top-lg highlight-card">
-                    <div class="card-header">
-                        <h3>Averaged Global Model (FedAvg Aggregator)</h3>
-                        <span class="badge badge-success">np.mean(weights)</span>
-                    </div>
-                    <div class="global-model-body" id="global-model-box">
-                        <!-- Injected dynamically -->
-                    </div>
-                </div>
-            </section>
-
-            <!-- 6. NATIONAL & BRICS SIMULATION PANEL -->
-            <section id="national-brics-panel" class="tab-content">
-                <div class="section-header">
-                    <h2>National Command Dashboard & BRICS Simulation</h2>
-                    <span class="badge badge-simulated">BRICS Simulation Mode</span>
-                </div>
-
-                <div class="alert-banner alert-simulated">
-                    <div class="banner-icon">🌐</div>
-                    <div>
-                        <strong>HONEST SIMULATION LABEL:</strong> Nodes 3 & 4 are relabelled as partner nations (Brazil & South Africa) to demonstrate cross-border federated aggregation without actual cross-border network deployments.
-                    </div>
-                </div>
-
-                <div class="brics-grid margin-top-lg" id="brics-nodes-container">
-                    <!-- BRICS node cards injected here -->
-                </div>
-            </section>
-
-            <!-- 7. PRIVACY & ENCRYPTION INSPECTOR -->
-            <section id="privacy-panel" class="tab-content">
-                <div class="section-header">
-                    <h2>Privacy Layer & Field Encryption Inspector</h2>
-                </div>
-
-                <div class="card shadow-sm">
-                    <div class="card-header">
-                        <h3>Interactive Encryption & Differential Privacy Test</h3>
-                    </div>
-                    <div class="form-layout">
-                        <div class="form-group">
-                            <label for="privacy-input">Enter Sensitive Staff or Patient ID:</label>
-                            <input type="text" id="privacy-input" value="STF-DOCTOR-8842" placeholder="e.g. STF-101">
-                        </div>
-                        <button class="btn btn-primary" onclick="testPrivacyLayer()">🔐 Test Encryption & Noise</button>
-                    </div>
-
-                    <div id="privacy-results" class="margin-top-lg" style="display: none;">
-                        <div class="privacy-result-card">
-                            <h4>1. Fernet Symmetric Field Encryption</h4>
-                            <div class="code-block" id="res-encrypted">--</div>
+                    <div class="content-grid-2col margin-top-lg">
+                        <!-- Q4: Digital Medicine Passport & Provenance -->
+                        <div class="card shadow-sm">
+                            <div class="card-header">
+                                <h3>Q4: Digital Medicine Passport & Provenance Scanner</h3>
+                            </div>
+                            <div class="form-layout">
+                                <div class="form-group">
+                                    <label for="batch-id-input">Enter Medicine Batch ID:</label>
+                                    <input type="text" id="batch-id-input" value="BATCH-ORS-2026-A1" placeholder="e.g. BATCH-ORS-2026-A1">
+                                </div>
+                                <button class="btn btn-primary" onclick="verifyBatchPassport()">🔍 Scan & Verify Batch Provenance</button>
+                            </div>
+                            <div id="provenance-results" class="code-block margin-top-md" style="display:none;">
+                                --
+                            </div>
                         </div>
 
-                        <div class="privacy-result-card margin-top-md">
-                            <h4>2. Decryption Verification</h4>
-                            <div class="code-block" id="res-decrypted">--</div>
-                        </div>
-
-                        <div class="privacy-result-card margin-top-md">
-                            <h4>3. SHA-256 Tokenization (Public Identifier)</h4>
-                            <div class="code-block" id="res-token">--</div>
-                        </div>
-
-                        <div class="privacy-result-card margin-top-md">
-                            <h4>4. Differential Privacy Noise Simulation (Aggregate Counts)</h4>
-                            <div class="code-block" id="res-dp">--</div>
+                        <!-- Q3: Role-Based Access Control Login -->
+                        <div class="card shadow-sm">
+                            <div class="card-header">
+                                <h3>Q3: OAuth2 / JWT Role-Based Access Control (RBAC)</h3>
+                            </div>
+                            <div class="form-layout">
+                                <div class="form-group">
+                                    <label>Select Demo Persona Role:</label>
+                                    <select id="rbac-role-select">
+                                        <option value="phc_nurse:nurse123">PHC Nurse (Role: PHC_STAFF)</option>
+                                        <option value="district_officer:officer123">District Officer (Role: DISTRICT_OFFICER)</option>
+                                        <option value="national_admin:admin123">National Administrator (Role: NATIONAL_ADMIN)</option>
+                                    </select>
+                                </div>
+                                <button class="btn btn-success" onclick="testRBACAuth()">🔑 Login & Issue JWT Session Token</button>
+                            </div>
+                            <div id="rbac-results" class="code-block margin-top-md" style="display:none;">
+                                --
+                            </div>
                         </div>
                     </div>
-                </div>
-            </section>
+                </section>
 
-        </main>
+            </main>
+        </div>
     </div>
 
     <script src="/static/app.js"></script>

@@ -17,8 +17,20 @@ class BedStatusUpdate(BaseModel):
 class StaffAttendanceCreate(BaseModel):
     phc_id: str
     staff_id: str
-    present: int  # 1 for present, 0 for absent
-    date: str
+    staff_name: Optional[str] = None
+    role: Optional[str] = None
+    card_uid: Optional[str] = None
+    present: int = 1  # 1 for present, 0 for absent
+    status: Optional[str] = "CHECKED_IN"
+    verification_method: Optional[str] = "Manual Kiosk"
+    punch_in_time: Optional[str] = None
+    punch_out_time: Optional[str] = None
+    date: Optional[str] = None
+
+class CardPunchRequest(BaseModel):
+    card_uid: str
+    phc_id: Optional[str] = "PHC-001"
+    verification_method: Optional[str] = "RFID Card Punch"
 
 class PatientFootfallCreate(BaseModel):
     phc_id: str

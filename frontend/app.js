@@ -4,18 +4,51 @@ let footfallChartInstance = null;
 let forecastChartInstance = null;
 let speechRecognitionInstance = null;
 
+// Attendance module state
+let currentAttendanceRosterData = [];
+let currentStaffMembers = [];
+let lastPunchTimes = {}; // Card UID -> timestamp (ms) for debounce/duplicate prevention
+
 document.addEventListener("DOMContentLoaded", () => {
+    // Check URL hash for initial tab route (e.g. #staff-attendance-panel)
+    const initialHash = window.location.hash ? window.location.hash.replace("#", "") : "phc-dashboard";
+
     loadPHCDashboard(activePhcId);
     loadDistrictData();
     loadRedistributionRecommendations();
     loadFederatedData();
     loadNationalBricsData();
     loadNationalDashboard();
+    loadStaffAttendancePage(activePhcId);
     startTerminalClock();
+
+    if (initialHash && document.getElementById(initialHash)) {
+        const titleMap = {
+            "phc-dashboard": "PHC Edge Node",
+            "staff-attendance-panel": "Nurse & Staff Attendance Management",
+            "district-dashboard": "District Command & Alerts",
+            "redistribution-panel": "Redistribution Engine",
+            "forecasting-panel": "AI Forecasting & Math",
+            "federated-panel": "Federated AI (FedAvg)",
+            "national-dashboard": "National Health Command Center",
+            "national-brics-panel": "BRICS Federated Layer",
+            "privacy-panel": "Privacy & Encryption",
+            "enterprise-panel": "Enterprise Control Center"
+        };
+        switchTab(initialHash, titleMap[initialHash] || null, false);
+    }
 });
 
-// TAB SWITCHING
-function switchTab(tabId, titleText) {
+// Support browser Back/Forward navigation with hash routing
+window.addEventListener("hashchange", () => {
+    const hash = window.location.hash.replace("#", "");
+    if (hash && document.getElementById(hash)) {
+        switchTab(hash, null, false);
+    }
+});
+
+// TAB SWITCHING WITH HASH ROUTING SUPPORT
+function switchTab(tabId, titleText, updateHash = true) {
     document.querySelectorAll(".tab-content").forEach(el => el.classList.remove("active"));
     document.querySelectorAll(".sidebar-btn, .nav-btn").forEach(el => el.classList.remove("active"));
 
@@ -30,8 +63,13 @@ function switchTab(tabId, titleText) {
         if (titleEl) titleEl.innerText = titleText;
     }
 
+    if (updateHash) {
+        window.location.hash = tabId;
+    }
+
     if (tabId === 'forecasting-panel') updateForecastView();
     if (tabId === 'national-dashboard') loadNationalDashboard();
+    if (tabId === 'staff-attendance-panel') loadStaffAttendancePage(activePhcId);
 }
 
 // -------------------------------------------------------------
@@ -85,39 +123,53 @@ async function loadPHCDashboard(phcId) {
         if (footSubEl) footSubEl.innerText = `vs ${prevCount} last Sun`;
 
         const staffMembers = data.staff_members || [];
-        const totalStaff = Math.max(staffMembers.length, 5);
-        const checkedInStaff = data.staff_attendance.filter(s => s.status === "CHECKED_IN" || s.present === 1).length;
-        const absentStaff = Math.max(0, totalStaff - checkedInStaff);
+        const attendanceList = data.staff_attendance || [];
+        const totalStaff = staffMembers.length || 8;
 
+        // Map latest record per staff member
+        const latestMap = {};
+        attendanceList.forEach(rec => {
+            if (!latestMap[rec.staff_id]) {
+                latestMap[rec.staff_id] = rec;
+            }
+        });
+
+        let presentStaff = 0;
+        let onLeaveStaff = 0;
+        let absentStaff = 0;
+
+        staffMembers.forEach(mem => {
+            const rec = latestMap[mem.staff_id];
+            if (!rec) {
+                absentStaff++;
+            } else if (rec.status === "CHECKED_IN" || rec.status === "LATE" || rec.present === 1 && rec.status !== "CHECKED_OUT") {
+                presentStaff++;
+            } else if (rec.status === "ON_LEAVE") {
+                onLeaveStaff++;
+            } else {
+                absentStaff++;
+            }
+        });
+
+        const onDutyPct = totalStaff > 0 ? Math.round((presentStaff / totalStaff) * 100) : 0;
+
+        // Top Metric Card on PHC Dashboard
         const staffValEl = document.getElementById("phc-staff-value");
-        if (staffValEl) staffValEl.innerHTML = `${checkedInStaff} <span class="metric-total">/ ${totalStaff}</span>`;
+        if (staffValEl) staffValEl.innerHTML = `${presentStaff} <span class="metric-total">/ ${totalStaff}</span>`;
         const staffSubEl = document.getElementById("phc-staff-sub");
         if (staffSubEl) staffSubEl.innerText = `${absentStaff} absent / off duty`;
 
-        // Populate Quick-Tap RFID Staff Badges
-        const quickBadgesBox = document.getElementById("rfid-quick-badges");
-        if (quickBadgesBox && staffMembers.length > 0) {
-            quickBadgesBox.innerHTML = "";
-            staffMembers.forEach(mem => {
-                const btn = document.createElement("button");
-                btn.className = "rfid-badge-btn";
-                btn.innerHTML = `💳 <strong>${mem.name}</strong> (${mem.role})<br><small style="font-family:var(--font-mono); color:var(--text-accent);">${mem.card_uid}</small>`;
-                btn.onclick = () => triggerCardPunch(mem.card_uid);
-                quickBadgesBox.appendChild(btn);
-            });
-        }
-
-        // Populate Kiosk Staff Select Dropdown
-        const kioskSelect = document.getElementById("kiosk-staff-select");
-        if (kioskSelect && staffMembers.length > 0) {
-            kioskSelect.innerHTML = `<option value="" disabled selected>-- Select Staff Member / Nurse --</option>`;
-            staffMembers.forEach(mem => {
-                const opt = document.createElement("option");
-                opt.value = mem.staff_id;
-                opt.textContent = `${mem.name} (${mem.role}) — ${mem.staff_id}`;
-                kioskSelect.appendChild(opt);
-            });
-        }
+        // Summary Card on PHC Dashboard (Replacement of full portal)
+        const sumPresent = document.getElementById("phc-summary-present");
+        if (sumPresent) sumPresent.innerHTML = `${presentStaff} <span class="metric-total">staff</span>`;
+        const sumAbsent = document.getElementById("phc-summary-absent");
+        if (sumAbsent) sumAbsent.innerHTML = `${absentStaff} <span class="metric-total">staff</span>`;
+        const sumLeave = document.getElementById("phc-summary-leave");
+        if (sumLeave) sumLeave.innerHTML = `${onLeaveStaff} <span class="metric-total">staff</span>`;
+        const sumOnDuty = document.getElementById("phc-summary-onduty-pct");
+        if (sumOnDuty) sumOnDuty.innerText = `${onDutyPct}%`;
+        const sumOnDutySub = document.getElementById("phc-summary-onduty-sub");
+        if (sumOnDutySub) sumOnDutySub.innerText = `${presentStaff} of ${totalStaff} staff on active duty`;
 
         // 2. Render Inventory Table
         const tbody = document.querySelector("#phc-inventory-table tbody");
@@ -147,36 +199,6 @@ async function loadPHCDashboard(phcId) {
 
         // 3. Render Footfall Chart
         renderFootfallChart(data.patient_footfall);
-
-        // 4. Render Staff Attendance Table
-        const staffTbody = document.querySelector("#staff-table tbody");
-        if (staffTbody) {
-            staffTbody.innerHTML = "";
-            data.staff_attendance.forEach(stf => {
-                const tr = document.createElement("tr");
-                const isCheckedIn = stf.status === "CHECKED_IN" || stf.present === 1;
-                const statusBadge = isCheckedIn 
-                    ? '<span class="badge badge-success">🟢 CHECKED IN</span>' 
-                    : '<span class="badge badge-danger">🔴 CHECKED OUT / ABSENT</span>';
-
-                tr.innerHTML = `
-                    <td>
-                        <strong>${stf.staff_name || stf.staff_id}</strong><br>
-                        <span style="font-size:0.75rem; color:var(--text-muted);">${stf.role || 'Healthcare Staff'}</span>
-                    </td>
-                    <td><span class="card-uid-pill">${stf.card_uid || 'N/A'}</span></td>
-                    <td>${statusBadge}</td>
-                    <td>
-                        <span style="font-size:0.8rem; font-family:var(--font-mono);">In: ${stf.punch_in_time || '08:00 AM'}</span><br>
-                        <span style="font-size:0.75rem; color:var(--text-muted); font-family:var(--font-mono);">Out: ${stf.punch_out_time || '--'}</span>
-                    </td>
-                    <td><span class="badge badge-secondary" style="font-size:0.7rem;">${stf.verification_method || 'RFID Card'}</span></td>
-                    <td><code style="font-size:0.7rem;">${(stf.staff_id_encrypted || '').substring(0, 20)}...</code></td>
-                    <td><code style="font-size:0.75rem;">${stf.staff_token || ''}</code></td>
-                `;
-                staffTbody.appendChild(tr);
-            });
-        }
 
     } catch (err) {
         console.error("Error loading PHC Dashboard:", err);
@@ -1041,9 +1063,385 @@ function startTerminalClock() {
     }, 1000);
 }
 
+// -------------------------------------------------------------
+// DEDICATED STAFF ATTENDANCE PAGE LOADER & STATE CONTROLLER
+// -------------------------------------------------------------
+async function loadStaffAttendancePage(phcId) {
+    const targetPhc = phcId || activePhcId || "PHC-001";
+    activePhcId = targetPhc;
+
+    const selectEl = document.getElementById("attendance-phc-select");
+    if (selectEl) selectEl.value = targetPhc;
+
+    const dateDisplay = document.getElementById("attendance-date-display");
+    const screenDate = document.getElementById("terminal-screen-date");
+    const now = new Date();
+    const dateFormatted = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+    if (dateDisplay) dateDisplay.innerText = dateFormatted;
+    if (screenDate) screenDate.innerText = `TERMINAL READY • ${dateFormatted}`;
+
+    try {
+        const [membersRes, attendanceRes] = await Promise.all([
+            fetch(`/api/staff/members?phc_id=${targetPhc}`),
+            fetch(`/api/staff?phc_id=${targetPhc}`)
+        ]);
+
+        const members = await membersRes.json();
+        const attendanceRecords = await attendanceRes.json();
+        currentStaffMembers = members || [];
+
+        // Build status map (latest record per staff_id)
+        const latestStatusMap = {};
+        (attendanceRecords || []).forEach(rec => {
+            if (!latestStatusMap[rec.staff_id]) {
+                latestStatusMap[rec.staff_id] = rec;
+            }
+        });
+
+        // Compute summary metrics across registered members
+        let presentCount = 0;
+        let absentCount = 0;
+        let leaveCount = 0;
+        let checkedOutCount = 0;
+
+        const compositeRoster = currentStaffMembers.map(mem => {
+            const rec = latestStatusMap[mem.staff_id];
+            const status = rec ? rec.status : "ABSENT";
+            if (status === "CHECKED_IN" || status === "LATE" || (rec && rec.present === 1 && status !== "CHECKED_OUT")) {
+                presentCount++;
+            } else if (status === "ON_LEAVE") {
+                leaveCount++;
+            } else if (status === "CHECKED_OUT") {
+                checkedOutCount++;
+            } else {
+                absentCount++;
+            }
+
+            return {
+                staff_id: mem.staff_id,
+                name: mem.name,
+                role: mem.role,
+                card_uid: mem.card_uid,
+                status: status,
+                punch_in_time: rec ? rec.punch_in_time : "--",
+                punch_out_time: rec ? rec.punch_out_time : "--",
+                shift: rec && rec.shift ? rec.shift : "Morning Shift (08:00 - 16:00)",
+                department: rec && rec.department ? rec.department : getDeptForRole(mem.role),
+                verification_method: rec && rec.verification_method ? rec.verification_method : "N/A",
+                last_updated: rec && rec.updated_at ? formatTimeAgo(rec.updated_at) : (rec && rec.punch_in_time ? rec.punch_in_time : "Today"),
+                encrypted_id: rec ? rec.staff_id_encrypted : "",
+                token: rec ? rec.staff_token : ("TOK-" + mem.staff_id.replace(/[^A-Z0-9]/g, '')),
+                remarks: rec ? rec.remarks : ""
+            };
+        });
+
+        currentAttendanceRosterData = compositeRoster;
+
+        const totalStaff = currentStaffMembers.length;
+        const onDutyPct = totalStaff > 0 ? Math.round((presentCount / totalStaff) * 100) : 0;
+
+        // 1. Update Attendance Overview 5 KPI Cards
+        const statTotal = document.getElementById("att-stat-total");
+        if (statTotal) statTotal.innerHTML = `${totalStaff} <span class="unit">personnel</span>`;
+
+        const statPresent = document.getElementById("att-stat-present");
+        if (statPresent) statPresent.innerHTML = `${presentCount} <span class="unit">staff</span>`;
+
+        const statAbsent = document.getElementById("att-stat-absent");
+        if (statAbsent) statAbsent.innerHTML = `${absentCount} <span class="unit">staff</span>`;
+
+        const statLeave = document.getElementById("att-stat-leave");
+        if (statLeave) statLeave.innerHTML = `${leaveCount} <span class="unit">staff</span>`;
+
+        const statOnDuty = document.getElementById("att-stat-onduty");
+        if (statOnDuty) statOnDuty.innerText = `${onDutyPct}%`;
+        const statOnDutySub = document.getElementById("att-stat-onduty-sub");
+        if (statOnDutySub) statOnDutySub.innerText = `${presentCount} of ${totalStaff} staff active on duty`;
+
+        // 2. Synchronize Summary Card on PHC Edge Dashboard
+        const sumPresent = document.getElementById("phc-summary-present");
+        if (sumPresent) sumPresent.innerHTML = `${presentCount} <span class="metric-total">staff</span>`;
+        const sumAbsent = document.getElementById("phc-summary-absent");
+        if (sumAbsent) sumAbsent.innerHTML = `${absentCount} <span class="metric-total">staff</span>`;
+        const sumLeave = document.getElementById("phc-summary-leave");
+        if (sumLeave) sumLeave.innerHTML = `${leaveCount} <span class="metric-total">staff</span>`;
+        const sumOnDuty = document.getElementById("phc-summary-onduty-pct");
+        if (sumOnDuty) sumOnDuty.innerText = `${onDutyPct}%`;
+        const sumOnDutySub = document.getElementById("phc-summary-onduty-sub");
+        if (sumOnDutySub) sumOnDutySub.innerText = `${presentCount} of ${totalStaff} staff on active duty`;
+
+        // Top metric on PHC Dashboard
+        const staffValEl = document.getElementById("phc-staff-value");
+        if (staffValEl) staffValEl.innerHTML = `${presentCount} <span class="metric-total">/ ${totalStaff}</span>`;
+        const staffSubEl = document.getElementById("phc-staff-sub");
+        if (staffSubEl) staffSubEl.innerText = `${absentStaff} absent / off duty`;
+
+        // 3. Populate Quick-Tap Demo Badges
+        const quickBadgesBox = document.getElementById("rfid-quick-badges");
+        if (quickBadgesBox) {
+            quickBadgesBox.innerHTML = "";
+            currentStaffMembers.forEach(mem => {
+                const rec = latestStatusMap[mem.staff_id];
+                const isPresent = rec && (rec.status === "CHECKED_IN" || rec.status === "LATE");
+                const isLeave = rec && rec.status === "ON_LEAVE";
+                const isCheckedOut = rec && rec.status === "CHECKED_OUT";
+
+                let statusDot = isPresent ? "🟢" : (isLeave ? "🟡" : (isCheckedOut ? "🔵" : "🔴"));
+                const btn = document.createElement("button");
+                btn.className = "rfid-badge-btn";
+                btn.innerHTML = `
+                    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                        <div>
+                            <strong>${mem.name}</strong>
+                            <div style="font-size:0.7rem; color:var(--text-muted);">${mem.role}</div>
+                        </div>
+                        <span style="font-size:0.8rem;">${statusDot}</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-top:4px; font-family:var(--font-mono); font-size:0.7rem;">
+                        <span style="color:#38BDF8;">${mem.card_uid}</span>
+                        <span style="color:var(--text-muted);">${mem.staff_id}</span>
+                    </div>
+                `;
+                btn.onclick = () => triggerCardPunch(mem.card_uid);
+                quickBadgesBox.appendChild(btn);
+            });
+        }
+
+        // 4. Populate Manual Entry Dropdown
+        const kioskSelect = document.getElementById("kiosk-staff-select");
+        if (kioskSelect) {
+            kioskSelect.innerHTML = `<option value="" disabled selected>-- Select Staff Member / Nurse --</option>`;
+            currentStaffMembers.forEach(mem => {
+                const opt = document.createElement("option");
+                opt.value = mem.staff_id;
+                opt.textContent = `${mem.name} (${mem.role}) — ${mem.staff_id}`;
+                kioskSelect.appendChild(opt);
+            });
+        }
+
+        // 5. Render Live Roster Table
+        filterAttendanceRoster();
+
+        // 6. Render Privacy Audit Log
+        renderPrivacyAuditLog(attendanceRecords || []);
+
+    } catch (err) {
+        console.error("Error loading Staff Attendance page:", err);
+    }
+}
+
+// -------------------------------------------------------------
+// LIVE ATTENDANCE ROSTER FILTER & RENDER FUNCTIONS
+// -------------------------------------------------------------
+function filterAttendanceRoster() {
+    const searchEl = document.getElementById("att-filter-search");
+    const statusEl = document.getElementById("att-filter-status");
+    const shiftEl = document.getElementById("att-filter-shift");
+
+    const search = searchEl ? searchEl.value.trim().toLowerCase() : "";
+    const status = statusEl ? statusEl.value : "ALL";
+    const shift = shiftEl ? shiftEl.value : "ALL";
+
+    let filtered = currentAttendanceRosterData.filter(item => {
+        // Search filter
+        if (search) {
+            const matchesSearch = item.name.toLowerCase().includes(search) ||
+                                  item.staff_id.toLowerCase().includes(search) ||
+                                  item.role.toLowerCase().includes(search) ||
+                                  item.card_uid.toLowerCase().includes(search);
+            if (!matchesSearch) return false;
+        }
+
+        // Status filter
+        if (status !== "ALL") {
+            if (status === "CHECKED_IN" && item.status !== "CHECKED_IN") return false;
+            if (status === "CHECKED_OUT" && item.status !== "CHECKED_OUT") return false;
+            if (status === "LATE" && item.status !== "LATE") return false;
+            if (status === "ON_LEAVE" && item.status !== "ON_LEAVE") return false;
+            if (status === "ABSENT" && item.status !== "ABSENT") return false;
+        }
+
+        // Shift filter
+        if (shift !== "ALL") {
+            const shiftOrDept = (item.shift + " " + item.department).toLowerCase();
+            if (!shiftOrDept.includes(shift.toLowerCase())) return false;
+        }
+
+        return true;
+    });
+
+    renderAttendanceRoster(filtered);
+}
+
+function renderAttendanceRoster(records) {
+    const tbody = document.getElementById("staff-roster-tbody");
+    const emptyState = document.getElementById("staff-roster-empty");
+    const tableEl = document.getElementById("staff-roster-table");
+
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    if (!records || records.length === 0) {
+        if (emptyState) emptyState.style.display = "block";
+        if (tableEl) tableEl.style.display = "none";
+        return;
+    }
+
+    if (emptyState) emptyState.style.display = "none";
+    if (tableEl) tableEl.style.display = "table";
+
+    records.forEach(stf => {
+        const tr = document.createElement("tr");
+
+        let statusBadge = "";
+        let actionButtons = "";
+
+        if (stf.status === "CHECKED_IN") {
+            statusBadge = `<span class="badge-status badge-present">● Present</span>`;
+            actionButtons = `
+                <button class="btn-table-action danger" onclick="handleStaffQuickAction('${stf.staff_id}', 'CHECK_OUT')">Check Out</button>
+                <button class="btn-table-action" onclick="handleStaffQuickAction('${stf.staff_id}', 'MARK_LEAVE')">Leave</button>
+            `;
+        } else if (stf.status === "LATE") {
+            statusBadge = `<span class="badge-status badge-late">⏱️ Late</span>`;
+            actionButtons = `
+                <button class="btn-table-action danger" onclick="handleStaffQuickAction('${stf.staff_id}', 'CHECK_OUT')">Check Out</button>
+                <button class="btn-table-action" onclick="handleStaffQuickAction('${stf.staff_id}', 'MARK_LEAVE')">Leave</button>
+            `;
+        } else if (stf.status === "CHECKED_OUT") {
+            statusBadge = `<span class="badge-status badge-checked-out">↩ Checked Out</span>`;
+            actionButtons = `
+                <button class="btn-table-action primary" onclick="handleStaffQuickAction('${stf.staff_id}', 'CHECK_IN')">Check In</button>
+                <button class="btn-table-action" onclick="handleStaffQuickAction('${stf.staff_id}', 'MARK_LEAVE')">Leave</button>
+            `;
+        } else if (stf.status === "ON_LEAVE") {
+            statusBadge = `<span class="badge-status badge-leave">🏖️ On Leave</span>`;
+            actionButtons = `
+                <button class="btn-table-action primary" onclick="handleStaffQuickAction('${stf.staff_id}', 'CHECK_IN')">Return to Duty</button>
+            `;
+        } else {
+            statusBadge = `<span class="badge-status badge-absent">✕ Absent</span>`;
+            actionButtons = `
+                <button class="btn-table-action primary" onclick="handleStaffQuickAction('${stf.staff_id}', 'CHECK_IN')">Check In</button>
+                <button class="btn-table-action" onclick="handleStaffQuickAction('${stf.staff_id}', 'MARK_LEAVE')">Sanction Leave</button>
+            `;
+        }
+
+        tr.innerHTML = `
+            <td><code>${stf.staff_id}</code></td>
+            <td>
+                <strong>${stf.name}</strong><br>
+                <small style="font-family:var(--font-mono); color:var(--text-muted);">${stf.card_uid}</small>
+            </td>
+            <td><span style="font-size:0.8rem; color:var(--text-secondary);">${stf.role}</span></td>
+            <td>${statusBadge}</td>
+            <td><span style="font-size:0.8rem; font-family:var(--font-mono); font-weight:600;">${stf.punch_in_time || '--'}</span></td>
+            <td><span style="font-size:0.8rem; font-family:var(--font-mono); color:var(--text-muted);">${stf.punch_out_time || '--'}</span></td>
+            <td>
+                <span style="font-size:0.8rem; font-weight:600;">${stf.department}</span><br>
+                <small style="font-size:0.7rem; color:var(--text-muted);">${stf.shift}</small>
+            </td>
+            <td><span class="badge badge-secondary" style="font-size:0.7rem;">${stf.verification_method}</span></td>
+            <td><span style="font-size:0.75rem; color:var(--text-muted); font-family:var(--font-mono);">${stf.last_updated}</span></td>
+            <td style="text-align:right;">
+                <div style="display:inline-flex; gap:6px; justify-content:flex-end;">
+                    ${actionButtons}
+                </div>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function resetAttendanceFilters() {
+    const s = document.getElementById("att-filter-search");
+    const st = document.getElementById("att-filter-status");
+    const sh = document.getElementById("att-filter-shift");
+    const d = document.getElementById("att-filter-date");
+    if (s) s.value = "";
+    if (st) st.value = "ALL";
+    if (sh) sh.value = "ALL";
+    if (d) d.value = "";
+    filterAttendanceRoster();
+}
+
+function refreshStaffAttendanceData() {
+    loadStaffAttendancePage(activePhcId);
+}
+
+function handleAttendancePhcChange(newPhcId) {
+    activePhcId = newPhcId;
+    const phcSelect = document.getElementById("phc-select");
+    if (phcSelect) phcSelect.value = newPhcId;
+    loadStaffAttendancePage(newPhcId);
+    loadPHCDashboard(newPhcId);
+}
+
+// -------------------------------------------------------------
+// PRIVACY-PRESERVED AUDIT LOG RENDERER
+// -------------------------------------------------------------
+function renderPrivacyAuditLog(records) {
+    const tbody = document.getElementById("staff-audit-tbody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    if (!records || records.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:20px;">No audit events recorded yet.</td></tr>`;
+        return;
+    }
+
+    records.slice(0, 15).forEach(rec => {
+        const tr = document.createElement("tr");
+
+        let actionPill = `<span class="badge badge-success">CHECK-IN</span>`;
+        if (rec.status === "CHECKED_OUT") actionPill = `<span class="badge badge-info">CHECK-OUT</span>`;
+        else if (rec.status === "ON_LEAVE") actionPill = `<span class="badge badge-warning">LEAVE_LOGGED</span>`;
+        else if (rec.status === "LATE") actionPill = `<span class="badge badge-purple">LATE_ENTRY</span>`;
+        else if (rec.status === "ABSENT") actionPill = `<span class="badge badge-danger">ABSENT_FLAG</span>`;
+
+        const cipherSnippet = (rec.staff_id_encrypted || '').substring(0, 20) + '...';
+        const timestamp = rec.updated_at ? formatTime(rec.updated_at) : (rec.date + " " + (rec.punch_in_time || "08:00 AM"));
+
+        tr.innerHTML = `
+            <td><span style="font-size:0.75rem; font-family:var(--font-mono);">${timestamp}</span></td>
+            <td>
+                <strong style="font-family:var(--font-mono); color:var(--accent-teal);">${rec.staff_token || 'TOK-ANON'}</strong><br>
+                <code style="font-size:0.68rem; color:var(--text-muted);">${cipherSnippet}</code>
+            </td>
+            <td>${actionPill}</td>
+            <td><span class="badge badge-secondary" style="font-size:0.7rem;">${rec.verification_method || 'RFID Reader'}</span></td>
+            <td><span style="font-size:0.75rem; font-family:var(--font-mono);">${rec.operator || 'TERMINAL-PHC-GATE1'}</span></td>
+            <td><span style="font-size:0.75rem; color:var(--text-secondary);">${rec.remarks || 'Routine shift punch'}</span></td>
+            <td><span class="badge badge-success" style="font-size:0.7rem;">VERIFIED</span></td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+// -------------------------------------------------------------
+// RFID CARD PUNCH WITH 15-SECOND ACCIDENTAL DUPLICATE LOCKOUT
+// -------------------------------------------------------------
 async function triggerCardPunch(cardUid) {
     const ledEl = document.getElementById("terminal-led");
     const msgEl = document.getElementById("terminal-screen-msg");
+    const dupBanner = document.getElementById("terminal-duplicate-banner");
+    const dupMsg = document.getElementById("terminal-duplicate-msg");
+    const verBox = document.getElementById("terminal-verification-box");
+
+    // Client-side 15-second duplicate punch lockout
+    const nowMs = Date.now();
+    if (lastPunchTimes[cardUid] && (nowMs - lastPunchTimes[cardUid]) < 15000) {
+        const remainingSecs = Math.ceil((15000 - (nowMs - lastPunchTimes[cardUid])) / 1000);
+        if (dupBanner && dupMsg) {
+            dupMsg.innerText = `Duplicate scan prevented: Card UID ${cardUid} was just scanned. Please wait ${remainingSecs}s before punching again.`;
+            dupBanner.style.display = "flex";
+            setTimeout(() => { if (dupBanner) dupBanner.style.display = "none"; }, 4000);
+        }
+        if (ledEl) ledEl.className = "led-ring yellow";
+        if (msgEl) msgEl.innerText = `⚠️ DUPLICATE SCAN PREVENTED (${remainingSecs}s lockout)`;
+        playTerminalChime(false);
+        return;
+    }
 
     if (ledEl) ledEl.className = "led-ring yellow";
     if (msgEl) msgEl.innerText = "READING CARD UID: " + cardUid + "...";
@@ -1055,22 +1453,48 @@ async function triggerCardPunch(cardUid) {
             body: JSON.stringify({
                 card_uid: cardUid,
                 phc_id: activePhcId,
-                verification_method: "RFID Smart Card Punch"
+                verification_method: "RFID Smart Card Punch",
+                operator: "TERMINAL-PHC-GATE1"
             })
         });
 
         const result = await res.json();
 
         if (res.ok && result.status === "success") {
+            lastPunchTimes[cardUid] = Date.now();
+            if (dupBanner) dupBanner.style.display = "none";
             if (ledEl) ledEl.className = "led-ring green";
             if (msgEl) {
                 msgEl.innerText = `✅ CARD ACCEPTED: ${result.staff_name.toUpperCase()} (${result.role}) - ${result.action} AT ${result.punch_time}`;
             }
+
+            // Show verification result card
+            if (verBox) {
+                const initials = result.staff_name.split(" ").map(w => w[0]).join("").substring(0, 2);
+                const avatarEl = document.getElementById("terminal-ver-avatar");
+                const nameEl = document.getElementById("terminal-ver-name");
+                const roleEl = document.getElementById("terminal-ver-role");
+                const tokenEl = document.getElementById("terminal-ver-token");
+                if (avatarEl) avatarEl.innerText = initials;
+                if (nameEl) nameEl.innerText = result.staff_name;
+                if (roleEl) roleEl.innerText = `${result.role} • ${result.action} at ${result.punch_time}`;
+                if (tokenEl) tokenEl.innerText = `TOKEN: ${result.token}`;
+                verBox.style.display = "flex";
+            }
+
             playTerminalChime(true);
+            await loadStaffAttendancePage(activePhcId);
             await loadPHCDashboard(activePhcId);
+            await loadDistrictData();
         } else {
             if (ledEl) ledEl.className = "led-ring red";
-            if (msgEl) msgEl.innerText = `❌ REJECTED: ${result.detail || "Card UID not registered"}`;
+            const errDetail = result.detail || "Card UID not registered";
+            if (msgEl) msgEl.innerText = `❌ REJECTED: ${errDetail}`;
+            if (errDetail.includes("Duplicate") && dupBanner && dupMsg) {
+                dupMsg.innerText = errDetail;
+                dupBanner.style.display = "flex";
+                setTimeout(() => { if (dupBanner) dupBanner.style.display = "none"; }, 4000);
+            }
             playTerminalChime(false);
         }
     } catch (err) {
@@ -1089,20 +1513,32 @@ function triggerCardScanInput() {
     }
 }
 
+// -------------------------------------------------------------
+// MANUAL ATTENDANCE ENTRY HANDLER WITH VALIDATION & FEEDBACK
+// -------------------------------------------------------------
 async function handleManualAttendanceSubmit(event) {
     event.preventDefault();
     const staffId = document.getElementById("kiosk-staff-select").value;
     const statusVal = document.getElementById("kiosk-status-select").value;
     const shiftVal = document.getElementById("kiosk-shift-select").value;
+    const deptVal = document.getElementById("kiosk-dept-select") ? document.getElementById("kiosk-dept-select").value : "General";
     const methodVal = document.getElementById("kiosk-method-select").value;
+    const remarksInput = document.getElementById("kiosk-remarks-input");
+    const remarksVal = remarksInput ? remarksInput.value.trim() : "";
+    const alertBox = document.getElementById("kiosk-alert-feedback");
+    const alertMsg = document.getElementById("kiosk-alert-msg");
 
     if (!staffId) {
-        alert("Please select a staff member");
+        if (alertBox && alertMsg) {
+            alertMsg.innerText = "Please select a staff member from the roster.";
+            alertBox.className = "att-inline-alert error";
+            setTimeout(() => { alertBox.className = "att-inline-alert"; }, 4000);
+        }
         return;
     }
 
     try {
-        const isPresent = statusVal === "ABSENT" ? 0 : 1;
+        const isPresent = (statusVal === "ABSENT" || statusVal === "ON_LEAVE") ? 0 : 1;
         const res = await fetch("/api/staff/log", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1111,17 +1547,109 @@ async function handleManualAttendanceSubmit(event) {
                 staff_id: staffId,
                 present: isPresent,
                 status: statusVal,
-                verification_method: `${methodVal} (${shiftVal})`
+                shift: shiftVal,
+                department: deptVal,
+                verification_method: methodVal,
+                remarks: remarksVal || `Manual status update: ${statusVal}`,
+                operator: "Supervisor Kiosk"
             })
         });
 
         const data = await res.json();
-        if (data.status === "success") {
-            alert(`Attendance logged successfully for ${data.staff_name || staffId}`);
-            loadPHCDashboard(activePhcId);
+        if (res.ok && data.status === "success") {
+            if (alertBox && alertMsg) {
+                alertMsg.innerText = `✅ Attendance successfully recorded for ${data.staff_name || staffId}: ${statusVal} (${shiftVal})`;
+                alertBox.className = "att-inline-alert success";
+                setTimeout(() => { alertBox.className = "att-inline-alert"; }, 4000);
+            }
+            if (remarksInput) remarksInput.value = "";
+            playTerminalChime(true);
+            await loadStaffAttendancePage(activePhcId);
+            await loadPHCDashboard(activePhcId);
+            await loadDistrictData();
+        } else {
+            if (alertBox && alertMsg) {
+                alertMsg.innerText = `❌ Error: ${data.detail || "Failed to log attendance"}`;
+                alertBox.className = "att-inline-alert error";
+                setTimeout(() => { alertBox.className = "att-inline-alert"; }, 4000);
+            }
+            playTerminalChime(false);
         }
     } catch (err) {
-        alert("Error submitting manual attendance check-in.");
+        if (alertBox && alertMsg) {
+            alertMsg.innerText = "❌ Network error submitting manual attendance.";
+            alertBox.className = "att-inline-alert error";
+            setTimeout(() => { alertBox.className = "att-inline-alert"; }, 4000);
+        }
+        playTerminalChime(false);
+    }
+}
+
+// -------------------------------------------------------------
+// TABLE QUICK ACTIONS (CHECK-OUT, LEAVE, RETURN TO DUTY)
+// -------------------------------------------------------------
+async function handleStaffQuickAction(staffId, action) {
+    try {
+        const res = await fetch("/api/staff/action", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                staff_id: staffId,
+                action: action,
+                phc_id: activePhcId,
+                remarks: `Quick table action: ${action}`,
+                operator: "Table Roster Quick-Action"
+            })
+        });
+
+        const data = await res.json();
+        if (res.ok && data.status === "success") {
+            playTerminalChime(true);
+            await loadStaffAttendancePage(activePhcId);
+            await loadPHCDashboard(activePhcId);
+            await loadDistrictData();
+        } else {
+            alert(`Action failed: ${data.detail || "Unknown error"}`);
+        }
+    } catch (err) {
+        alert("Error executing staff action.");
+    }
+}
+
+// -------------------------------------------------------------
+// HELPER UTILITIES
+// -------------------------------------------------------------
+function getDeptForRole(role) {
+    if (!role) return "General Ward";
+    if (role.includes("ICU")) return "Intensive Care Unit (ICU)";
+    if (role.includes("Emergency") || role.includes("Trauma")) return "Emergency & Trauma";
+    if (role.includes("Pharmacist")) return "Central Pharmacy";
+    if (role.includes("Lab")) return "Pathology Lab";
+    if (role.includes("Pediatric")) return "Pediatrics";
+    if (role.includes("Transport") || role.includes("Ambulance") || role.includes("Paramedic")) return "Ambulance Logistics";
+    if (role.includes("OPD")) return "General OPD";
+    return "General Ward";
+}
+
+function formatTimeAgo(isoString) {
+    if (!isoString) return "Today";
+    try {
+        const d = new Date(isoString);
+        if (isNaN(d.getTime())) return "Today";
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+        return "Today";
+    }
+}
+
+function formatTime(isoString) {
+    if (!isoString) return "Today";
+    try {
+        const d = new Date(isoString);
+        if (isNaN(d.getTime())) return isoString;
+        return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+        return isoString;
     }
 }
 
@@ -1144,4 +1672,5 @@ function playTerminalChime(isSuccess) {
         // AudioContext audio output
     }
 }
+
 

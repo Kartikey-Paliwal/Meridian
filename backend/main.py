@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from backend.database import get_db_connection, init_db
 from backend.models import (
     InventoryUpdate, BedStatusUpdate, StaffAttendanceCreate,
-    PatientFootfallCreate, TransferActionRequest, CardPunchRequest
+    PatientFootfallCreate, TransferActionRequest, CardPunchRequest, StaffActionRequest
 )
 from backend.forecasting import forecast_demand_linear_regression
 from backend.redistribution import generate_redistribution_recommendations
@@ -159,6 +159,7 @@ def card_punch_attendance(data: CardPunchRequest):
     """
     Hardware API Webhook for RFID / Smart Card / Biometric Card Punch Machines.
     Simulates hardware smart card scans, looking up staff members and toggling check-in / check-out.
+    Enforces duplicate-scan lockout (15s) to prevent accidental double taps.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -190,29 +191,51 @@ def card_punch_attendance(data: CardPunchRequest):
         "SELECT * FROM staff_attendance WHERE staff_id = ? AND date = ? ORDER BY id DESC LIMIT 1",
         (staff_id, date_str)
     )
-    existing = cursor.fetchone()
+    existing_row = cursor.fetchone()
+    existing = dict(existing_row) if existing_row else None
 
-    if existing and dict(existing)["status"] == "CHECKED_IN":
+    # Check for accidental duplicate scan (within 15 seconds lockout window)
+    if existing and existing.get("updated_at"):
+        try:
+            last_ts = datetime.fromisoformat(existing["updated_at"])
+            delta_secs = (now - last_ts).total_seconds()
+            if delta_secs < 15:
+                conn.close()
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Duplicate scan prevented: {staff_name} already punched {int(delta_secs)}s ago. Please wait before scanning again."
+                )
+        except (ValueError, TypeError):
+            pass
+
+    if existing and existing.get("status") in ["CHECKED_IN", "LATE"]:
         # Toggle to CHECKED_OUT
         new_status = "CHECKED_OUT"
         present_flag = 1
-        punch_in = dict(existing)["punch_in_time"] or time_str
+        punch_in = existing.get("punch_in_time") or time_str
         punch_out = time_str
         cursor.execute("""
         UPDATE staff_attendance
-        SET status = ?, punch_out_time = ?, verification_method = ?
+        SET status = ?, punch_out_time = ?, verification_method = ?, operator = ?, updated_at = ?
         WHERE id = ?
-        """, (new_status, punch_out, data.verification_method, dict(existing)["id"]))
+        """, (new_status, punch_out, data.verification_method, data.operator, now.isoformat(), existing["id"]))
     else:
         # Toggle or Create CHECKED_IN
         new_status = "CHECKED_IN"
         present_flag = 1
         punch_in = time_str
         punch_out = None
-        cursor.execute("""
-        INSERT INTO staff_attendance (phc_id, staff_id, staff_name, role, card_uid, staff_id_encrypted, staff_token, present, status, verification_method, punch_in_time, punch_out_time, date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (phc_id, staff_id, staff_name, role, card_uid, enc_id, tok_id, present_flag, new_status, data.verification_method, punch_in, punch_out, date_str))
+        if existing:
+            cursor.execute("""
+            UPDATE staff_attendance
+            SET status = ?, present = 1, punch_in_time = ?, punch_out_time = NULL, verification_method = ?, operator = ?, updated_at = ?
+            WHERE id = ?
+            """, (new_status, punch_in, data.verification_method, data.operator, now.isoformat(), existing["id"]))
+        else:
+            cursor.execute("""
+            INSERT INTO staff_attendance (phc_id, staff_id, staff_name, role, card_uid, staff_id_encrypted, staff_token, present, status, verification_method, punch_in_time, punch_out_time, date, shift, department, remarks, operator, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (phc_id, staff_id, staff_name, role, card_uid, enc_id, tok_id, present_flag, new_status, data.verification_method, punch_in, punch_out, date_str, "Morning Shift (08:00 - 16:00)", "General", "RFID Smart Card Swipe", data.operator, now.isoformat()))
 
     conn.commit()
     conn.close()
@@ -250,15 +273,99 @@ def log_staff_attendance(data: StaffAttendanceCreate):
     tok_id = tokenize_identifier(data.staff_id)
 
     status_str = data.status or ("CHECKED_IN" if data.present == 1 else "ABSENT")
+    present_val = 0 if status_str in ["ABSENT", "ON_LEAVE"] else 1
     
-    cursor.execute("""
-    INSERT INTO staff_attendance (phc_id, staff_id, staff_name, role, card_uid, staff_id_encrypted, staff_token, present, status, verification_method, punch_in_time, punch_out_time, date)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (data.phc_id, data.staff_id, name, role, c_uid, enc_id, tok_id, data.present, status_str, data.verification_method, time_str, data.punch_out_time, date_str))
+    # Check if existing record for this staff and date exists
+    cursor.execute(
+        "SELECT * FROM staff_attendance WHERE staff_id = ? AND date = ? ORDER BY id DESC LIMIT 1",
+        (data.staff_id, date_str)
+    )
+    existing = cursor.fetchone()
+
+    if existing:
+        cursor.execute("""
+        UPDATE staff_attendance
+        SET present = ?, status = ?, verification_method = ?, shift = ?, department = ?, remarks = ?, operator = ?, updated_at = ?,
+            punch_in_time = CASE WHEN ? IN ('ABSENT', 'ON_LEAVE') THEN NULL ELSE COALESCE(?, punch_in_time) END,
+            punch_out_time = CASE WHEN ? = 'CHECKED_OUT' THEN COALESCE(?, punch_out_time) ELSE punch_out_time END
+        WHERE id = ?
+        """, (present_val, status_str, data.verification_method, data.shift, data.department, data.remarks, data.operator, now.isoformat(), status_str, data.punch_in_time, status_str, data.punch_out_time, dict(existing)["id"]))
+    else:
+        p_in = None if status_str in ["ABSENT", "ON_LEAVE"] else time_str
+        cursor.execute("""
+        INSERT INTO staff_attendance (phc_id, staff_id, staff_name, role, card_uid, staff_id_encrypted, staff_token, present, status, verification_method, punch_in_time, punch_out_time, date, shift, department, remarks, operator, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (data.phc_id, data.staff_id, name, role, c_uid, enc_id, tok_id, present_val, status_str, data.verification_method, p_in, data.punch_out_time, date_str, data.shift, data.department, data.remarks, data.operator, now.isoformat()))
     
     conn.commit()
     conn.close()
-    return {"status": "success", "token": tok_id, "encrypted_id": enc_id, "staff_name": name}
+    return {"status": "success", "token": tok_id, "encrypted_id": enc_id, "staff_name": name, "new_status": status_str}
+
+@app.post("/api/staff/action", tags=["1. CRUD - Staff"])
+def execute_staff_action(data: StaffActionRequest):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now = datetime.now()
+    date_str = now.strftime("%Y-%m-%d")
+    time_str = now.strftime("%I:%M %p")
+
+    cursor.execute("SELECT * FROM staff_members WHERE staff_id = ?", (data.staff_id,))
+    member = cursor.fetchone()
+    if not member:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Staff member not found")
+
+    m_dict = dict(member)
+    phc_id = data.phc_id or m_dict["phc_id"]
+
+    cursor.execute("SELECT * FROM staff_attendance WHERE staff_id = ? AND date = ? ORDER BY id DESC LIMIT 1", (data.staff_id, date_str))
+    existing_row = cursor.fetchone()
+    existing = dict(existing_row) if existing_row else None
+
+    enc_id = encrypt_field(data.staff_id)
+    tok_id = tokenize_identifier(data.staff_id)
+
+    if data.action == "CHECK_OUT":
+        status_str = "CHECKED_OUT"
+        pres = 1
+        p_out = time_str
+        p_in = existing.get("punch_in_time") if existing else "08:00 AM"
+    elif data.action == "CHECK_IN":
+        status_str = "CHECKED_IN"
+        pres = 1
+        p_in = time_str
+        p_out = None
+    elif data.action == "MARK_LEAVE":
+        status_str = "ON_LEAVE"
+        pres = 0
+        p_in = None
+        p_out = None
+    elif data.action == "MARK_ABSENT":
+        status_str = "ABSENT"
+        pres = 0
+        p_in = None
+        p_out = None
+    else:
+        status_str = data.action
+        pres = 1
+        p_in = time_str
+        p_out = None
+
+    if existing:
+        cursor.execute("""
+        UPDATE staff_attendance
+        SET status = ?, present = ?, punch_in_time = ?, punch_out_time = ?, remarks = COALESCE(?, remarks), operator = ?, updated_at = ?
+        WHERE id = ?
+        """, (status_str, pres, p_in, p_out, data.remarks, data.operator, now.isoformat(), existing["id"]))
+    else:
+        cursor.execute("""
+        INSERT INTO staff_attendance (phc_id, staff_id, staff_name, role, card_uid, staff_id_encrypted, staff_token, present, status, verification_method, punch_in_time, punch_out_time, date, shift, department, remarks, operator, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (phc_id, data.staff_id, m_dict["name"], m_dict["role"], m_dict["card_uid"], enc_id, tok_id, pres, status_str, f"Quick Action ({data.action})", p_in, p_out, date_str, "Regular Shift", "General", data.remarks, data.operator, now.isoformat()))
+
+    conn.commit()
+    conn.close()
+    return {"status": "success", "action": data.action, "staff_name": m_dict["name"], "new_status": status_str}
 
 
 @app.get("/api/footfall", tags=["1. CRUD - Footfall"])

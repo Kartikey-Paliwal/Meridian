@@ -34,6 +34,12 @@
                     </div>
                 </button>
 
+                <button class="sidebar-btn" id="sidebar-staff-attendance-btn" onclick="switchTab('staff-attendance-panel', 'Nurse & Staff Attendance Management')">
+                    <div class="sidebar-btn-left">
+                        <span class="icon">🪪</span> Staff Attendance
+                    </div>
+                </button>
+
                 <button class="sidebar-btn" onclick="switchTab('district-dashboard', 'District Command & Alerts')">
                     <div class="sidebar-btn-left">
                         <span class="icon">📊</span> District Command
@@ -259,120 +265,372 @@
                         </form>
                     </div>
 
-                    <!-- NURSE & STAFF ATTENDANCE HUB — RFID SMART CARD & KIOSK TERMINAL -->
-                    <div class="full-card margin-top-lg rfid-hub-card">
-                        <div class="card-title-uppercase" style="display:flex; justify-content:space-between; align-items:center;">
+                    <!-- STAFF ATTENDANCE TODAY SUMMARY CARD (REPLACING FULL PORTAL) -->
+                    <div class="staff-summary-card margin-top-lg">
+                        <div class="staff-summary-header">
                             <div style="display:flex; align-items:center; gap:10px;">
-                                <span>🎴 NURSE & STAFF ATTENDANCE PORTAL</span>
-                                <span class="badge badge-primary">RFID / Smart Card Enabled</span>
+                                <span style="font-size:1.35rem;">🪪</span>
+                                <div>
+                                    <h3 style="font-size:0.95rem; font-weight:700; color:var(--text-primary); margin:0;">Staff Attendance Today</h3>
+                                    <div style="font-size:0.775rem; color:var(--text-muted);">Real-time shift presence & RFID check-in metrics</div>
+                                </div>
                             </div>
-                            <span class="badge badge-info">Fernet Field Encryption Active</span>
+                            <button class="btn-action-primary" onclick="switchTab('staff-attendance-panel', 'Nurse & Staff Attendance Management')" style="display:flex; align-items:center; gap:6px;">
+                                <span>View Attendance</span>
+                                <span>→</span>
+                            </button>
                         </div>
 
-                        <div class="attendance-grid-2col margin-top-md">
-                            <!-- LEFT COLUMN: RFID HARDWARE TERMINAL SIMULATOR -->
-                            <div class="terminal-box">
-                                <div class="terminal-header">
-                                    <div class="terminal-brand">
-                                        <span class="led-ring blue" id="terminal-led"></span>
-                                        <strong>MERIDIAN RFID CARD READER v2.4</strong>
-                                    </div>
-                                    <span class="terminal-id-tag">TERMINAL-PHC-GATE1</span>
-                                </div>
+                        <div class="staff-summary-grid">
+                            <div class="metric-card" style="margin:0; padding:14px; border-left:3px solid var(--accent-emerald);">
+                                <div class="metric-header-title">PRESENT TODAY</div>
+                                <div class="metric-value-row" id="phc-summary-present">0 <span class="metric-total">staff</span></div>
+                                <div class="metric-subtext" style="color:var(--accent-emerald);" id="phc-summary-present-sub">Checked in on shift</div>
+                            </div>
 
-                                <div class="terminal-screen" id="terminal-screen-display">
-                                    <div class="screen-clock" id="terminal-screen-clock">08:30:00 AM</div>
-                                    <div class="screen-subtext" id="terminal-screen-msg">TAP RFID CARD / BADGE TO PUNCH ATTENDANCE</div>
-                                </div>
+                            <div class="metric-card" style="margin:0; padding:14px; border-left:3px solid var(--accent-rose);">
+                                <div class="metric-header-title">ABSENT TODAY</div>
+                                <div class="metric-value-row" id="phc-summary-absent">0 <span class="metric-total">staff</span></div>
+                                <div class="metric-subtext" style="color:var(--accent-rose);" id="phc-summary-absent-sub">Unexcused absence</div>
+                            </div>
 
-                                <!-- HARDWARE CARD INPUT SIMULATOR -->
-                                <div class="terminal-input-group">
-                                    <input type="text" id="rfid-input-field" class="terminal-input" placeholder="Scan or Type Card UID (e.g. RFID-10101)..." onkeydown="if(event.key==='Enter') triggerCardScanInput()">
-                                    <button class="btn-punch-scan" onclick="triggerCardScanInput()">⚡ SCAN CARD</button>
-                                </div>
+                            <div class="metric-card" style="margin:0; padding:14px; border-left:3px solid var(--accent-amber);">
+                                <div class="metric-header-title">ON LEAVE</div>
+                                <div class="metric-value-row" id="phc-summary-leave">0 <span class="metric-total">staff</span></div>
+                                <div class="metric-subtext" style="color:var(--accent-amber);" id="phc-summary-leave-sub">Sanctioned medical / casual</div>
+                            </div>
 
-                                <!-- QUICK TAP STAFF RFID BADGES -->
-                                <div class="quick-badges-wrapper">
-                                    <div class="quick-badges-title">DEMO QUICK-TAP SMART CARDS (NURSES & STAFF):</div>
-                                    <div class="quick-badges-grid" id="rfid-quick-badges">
-                                        <!-- Injected by app.js -->
-                                    </div>
+                            <div class="metric-card" style="margin:0; padding:14px; border-left:3px solid var(--accent-teal);">
+                                <div class="metric-header-title">ON-DUTY COVERAGE</div>
+                                <div class="metric-value-row" id="phc-summary-onduty-pct">0%</div>
+                                <div class="metric-subtext" id="phc-summary-onduty-sub">Operational capacity</div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 1.5 DEDICATED NURSE & STAFF ATTENDANCE PAGE -->
+                <section id="staff-attendance-panel" class="tab-content">
+                    <div class="header-row">
+                        <div class="header-title-area">
+                            <span class="eyebrow-tag">SANJEEVANI GRID · WORKFORCE VISIBILITY</span>
+                            <h1 class="main-page-title">Nurse & Staff Attendance Management</h1>
+                            <p style="font-size:0.875rem; color:var(--text-secondary); margin-top:2px;">
+                                RFID and smart-card-enabled attendance monitoring for PHC personnel
+                            </p>
+                        </div>
+
+                        <div style="display:flex; align-items:center; gap:16px;">
+                            <div class="phc-selector-box">
+                                <span style="font-size:0.75rem; color:var(--text-muted); font-weight:600;">ACTIVE NODE:</span>
+                                <select id="attendance-phc-select" onchange="handleAttendancePhcChange(this.value)">
+                                    <option value="PHC-001" selected>PHC Rampur (PHC-001)</option>
+                                    <option value="PHC-002">PHC Beta Central (PHC-002)</option>
+                                    <option value="PHC-003">PHC Gamma Rural (PHC-003)</option>
+                                    <option value="PHC-004">PHC Delta Community (PHC-004)</option>
+                                </select>
+                            </div>
+
+                            <div class="date-widget">
+                                <span class="date-label">Today</span>
+                                <span class="date-value" id="attendance-date-display">Today</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 1. ATTENDANCE OVERVIEW CARDS (5 KPI CARDS) -->
+                    <div class="attendance-overview-grid">
+                        <div class="att-overview-card total">
+                            <div class="att-card-head">
+                                <span class="att-card-title">Total Registered Staff</span>
+                                <span class="att-card-icon">👥</span>
+                            </div>
+                            <div class="att-card-value" id="att-stat-total">0 <span class="unit">personnel</span></div>
+                            <div class="att-card-sub" style="color:var(--accent-teal);">Registered healthcare workers</div>
+                        </div>
+
+                        <div class="att-overview-card present">
+                            <div class="att-card-head">
+                                <span class="att-card-title">Present Today</span>
+                                <span class="att-card-icon">🟢</span>
+                            </div>
+                            <div class="att-card-value" id="att-stat-present" style="color:var(--accent-emerald);">0 <span class="unit">staff</span></div>
+                            <div class="att-card-sub" style="color:var(--accent-emerald);">Punched in & on duty</div>
+                        </div>
+
+                        <div class="att-overview-card absent">
+                            <div class="att-card-head">
+                                <span class="att-card-title">Absent Today</span>
+                                <span class="att-card-icon">🔴</span>
+                            </div>
+                            <div class="att-card-value" id="att-stat-absent" style="color:var(--accent-rose);">0 <span class="unit">staff</span></div>
+                            <div class="att-card-sub" style="color:var(--accent-rose);">Unexcused absence</div>
+                        </div>
+
+                        <div class="att-overview-card leave">
+                            <div class="att-card-head">
+                                <span class="att-card-title">On Leave</span>
+                                <span class="att-card-icon">🟡</span>
+                            </div>
+                            <div class="att-card-value" id="att-stat-leave" style="color:var(--accent-amber);">0 <span class="unit">staff</span></div>
+                            <div class="att-card-sub" style="color:var(--accent-amber);">Sanctioned leave records</div>
+                        </div>
+
+                        <div class="att-overview-card onduty">
+                            <div class="att-card-head">
+                                <span class="att-card-title">Currently On Duty</span>
+                                <span class="att-card-icon">⏱️</span>
+                            </div>
+                            <div class="att-card-value" id="att-stat-onduty" style="color:var(--accent-blue);">0%</div>
+                            <div class="att-card-sub" style="color:var(--accent-blue);" id="att-stat-onduty-sub">Operational coverage</div>
+                        </div>
+                    </div>
+
+                    <!-- 2 & 3. RFID TERMINAL & MANUAL ENTRY (2-COLUMN GRID) -->
+                    <div class="attendance-grid-2col">
+                        <!-- LEFT COLUMN: RFID HARDWARE TERMINAL SIMULATOR -->
+                        <div class="terminal-box">
+                            <div class="terminal-header">
+                                <div class="terminal-brand">
+                                    <span class="led-ring blue" id="terminal-led"></span>
+                                    <strong>MERIDIAN RFID CARD READER v2.4</strong>
+                                </div>
+                                <span class="terminal-id-tag">TERMINAL-PHC-GATE1</span>
+                            </div>
+
+                            <!-- Live Digital Clock & Screen -->
+                            <div class="terminal-screen" id="terminal-screen-display">
+                                <div class="screen-clock" id="terminal-screen-clock">08:30:00 AM</div>
+                                <div style="font-size:0.75rem; color:#38BDF8; font-family:var(--font-mono); margin-top:2px;" id="terminal-screen-date">Live Attendance Terminal</div>
+                                <div class="screen-subtext" id="terminal-screen-msg">TAP RFID CARD / BADGE TO PUNCH ATTENDANCE</div>
+                            </div>
+
+                            <!-- Duplicate Scan Prevention Alert Banner -->
+                            <div id="terminal-duplicate-banner" class="duplicate-warning-banner" style="display:none;">
+                                <span>⚠️</span>
+                                <span id="terminal-duplicate-msg">Duplicate scan prevented: Staff already punched recently.</span>
+                            </div>
+
+                            <!-- Verification Result Box -->
+                            <div id="terminal-verification-box" class="verification-result-box" style="display:none;">
+                                <div class="verification-avatar" id="terminal-ver-avatar">NA</div>
+                                <div class="verification-details">
+                                    <div class="verification-name" id="terminal-ver-name">Nurse Anita Sharma</div>
+                                    <div class="verification-meta" id="terminal-ver-role">Senior Staff Nurse • CHECKED IN at 08:15 AM</div>
+                                    <div style="font-size:0.7rem; font-family:var(--font-mono); color:#2DD4BF; margin-top:2px;" id="terminal-ver-token">TOKEN: TOK-83A6C625BD06</div>
                                 </div>
                             </div>
 
-                            <!-- RIGHT COLUMN: MANUAL NURSE & EMPLOYEE ATTENDANCE KIOSK -->
-                            <div class="kiosk-box">
-                                <div class="kiosk-header">
-                                    <h3>📋 Employee & Nurse Kiosk Check-In</h3>
-                                    <span class="badge badge-secondary">Manual Fallback</span>
+                            <!-- Hardware Card Input Simulator -->
+                            <div class="terminal-input-group">
+                                <input type="text" id="rfid-input-field" class="terminal-input" placeholder="Scan or Type Card UID (e.g. RFID-10101)..." onkeydown="if(event.key==='Enter') triggerCardScanInput()">
+                                <button class="btn-punch-scan" onclick="triggerCardScanInput()">⚡ SCAN CARD</button>
+                            </div>
+
+                            <!-- Quick Tap Staff Badges Simulation -->
+                            <div class="quick-badges-wrapper">
+                                <div class="quick-badges-title" style="display:flex; justify-content:space-between; align-items:center;">
+                                    <span>DEMO QUICK-TAP SMART CARDS (NURSES & STAFF):</span>
+                                    <span style="font-size:0.65rem; color:var(--text-muted);">Click badge to simulate card swipe</span>
+                                </div>
+                                <div class="quick-badges-grid" id="rfid-quick-badges">
+                                    <!-- Populated dynamically -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- RIGHT COLUMN: MANUAL NURSE & EMPLOYEE ATTENDANCE KIOSK -->
+                        <div class="kiosk-box">
+                            <div class="kiosk-header">
+                                <div>
+                                    <h3 style="font-size:0.95rem; font-weight:700; color:var(--text-primary); margin:0;">📋 Manual Attendance Entry & Override</h3>
+                                    <div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">Supervisor fallback for leave, shift updates, and off-grid logs</div>
+                                </div>
+                                <span class="badge badge-secondary">Manual Fallback</span>
+                            </div>
+
+                            <form id="kiosk-attendance-form" onsubmit="handleManualAttendanceSubmit(event)" style="display:flex; flex-direction:column; gap:12px; margin-top:14px;">
+                                <div>
+                                    <label class="form-label">Select Staff Member / Nurse: <span style="color:var(--accent-rose)">*</span></label>
+                                    <select id="kiosk-staff-select" class="clean-input" required>
+                                        <option value="" disabled selected>Loading staff roster...</option>
+                                    </select>
                                 </div>
 
-                                <form id="kiosk-attendance-form" onsubmit="handleManualAttendanceSubmit(event)" style="display:flex; flex-direction:column; gap:12px; margin-top:10px;">
+                                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
                                     <div>
-                                        <label class="form-label">Select Staff Member / Nurse:</label>
-                                        <select id="kiosk-staff-select" class="clean-input" required>
-                                            <option value="" disabled selected>Loading staff roster...</option>
+                                        <label class="form-label">Attendance Status: <span style="color:var(--accent-rose)">*</span></label>
+                                        <select id="kiosk-status-select" class="clean-input">
+                                            <option value="CHECKED_IN">Checked In (Present)</option>
+                                            <option value="CHECKED_OUT">Checked Out</option>
+                                            <option value="LATE">Late Arrival (Present)</option>
+                                            <option value="ON_LEAVE">On Approved Leave</option>
+                                            <option value="ABSENT">Absent / Unexcused</option>
                                         </select>
                                     </div>
-
-                                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
-                                        <div>
-                                            <label class="form-label">Attendance Status:</label>
-                                            <select id="kiosk-status-select" class="clean-input">
-                                                <option value="CHECKED_IN">Checked In (Present)</option>
-                                                <option value="CHECKED_OUT">Checked Out</option>
-                                                <option value="ABSENT">Absent / On Leave</option>
-                                            </select>
-                                        </div>
-                                        <div>
-                                            <label class="form-label">Shift / Department:</label>
-                                            <select id="kiosk-shift-select" class="clean-input">
-                                                <option value="Morning Shift (08:00 - 16:00)">Morning Shift</option>
-                                                <option value="Evening Shift (16:00 - 00:00)">Evening Shift</option>
-                                                <option value="Night Shift (00:00 - 08:00)">Night Shift</option>
-                                            </select>
-                                        </div>
+                                    <div>
+                                        <label class="form-label">Shift Schedule:</label>
+                                        <select id="kiosk-shift-select" class="clean-input">
+                                            <option value="Morning Shift (08:00 - 16:00)">Morning Shift (08:00 - 16:00)</option>
+                                            <option value="Evening Shift (16:00 - 00:00)">Evening Shift (16:00 - 00:00)</option>
+                                            <option value="Night Shift (00:00 - 08:00)">Night Shift (00:00 - 08:00)</option>
+                                        </select>
                                     </div>
+                                </div>
 
+                                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+                                    <div>
+                                        <label class="form-label">Department / Unit:</label>
+                                        <select id="kiosk-dept-select" class="clean-input">
+                                            <option value="Intensive Care Unit (ICU)">Intensive Care Unit (ICU)</option>
+                                            <option value="Emergency & Trauma">Emergency & Trauma</option>
+                                            <option value="General OPD">General OPD</option>
+                                            <option value="Central Pharmacy">Central Pharmacy</option>
+                                            <option value="Pathology Lab">Pathology Lab</option>
+                                            <option value="Pediatrics">Pediatrics</option>
+                                            <option value="General Ward">General Ward</option>
+                                            <option value="Ambulance Logistics">Ambulance Logistics</option>
+                                        </select>
+                                    </div>
                                     <div>
                                         <label class="form-label">Verification Method:</label>
                                         <select id="kiosk-method-select" class="clean-input">
                                             <option value="Manual Kiosk Check-in">Manual Kiosk Check-in</option>
-                                            <option value="Biometric Fingerprint">Biometric Fingerprint Scanner</option>
+                                            <option value="Supervisor Sanction">Supervisor Sanction</option>
+                                            <option value="Biometric Fingerprint Scanner">Biometric Fingerprint Scanner</option>
                                             <option value="Facial Recognition Kiosk">Facial Recognition Kiosk</option>
+                                            <option value="Mobile Health App">Mobile Health App</option>
                                         </select>
                                     </div>
+                                </div>
 
-                                    <button type="submit" class="btn-teal" style="margin-top:4px;">
-                                        Confirm & Submit Attendance
-                                    </button>
-                                </form>
+                                <div>
+                                    <label class="form-label">Optional Remarks / Handover Notes:</label>
+                                    <input type="text" id="kiosk-remarks-input" class="clean-input" placeholder="e.g. Sanctioned leave, cover assigned, late transit...">
+                                </div>
+
+                                <div id="kiosk-alert-feedback" class="att-inline-alert">
+                                    <span id="kiosk-alert-msg">Attendance logged successfully.</span>
+                                </div>
+
+                                <button type="submit" class="btn-teal" style="margin-top:6px;">
+                                    Confirm & Submit Attendance
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- 4. LIVE ATTENDANCE ROSTER -->
+                    <div class="full-card margin-top-lg">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:10px;">
+                            <div>
+                                <h3 style="font-size:1rem; font-weight:700; color:var(--text-primary); margin:0;">📋 Live Attendance Roster</h3>
+                                <div style="font-size:0.775rem; color:var(--text-muted);">Real-time presence, shift coverage, and punch timestamps</div>
+                            </div>
+                            <div style="display:flex; gap:8px;">
+                                <button class="btn-table-action primary" onclick="refreshStaffAttendanceData()">
+                                    <span>🔄</span> Refresh Roster
+                                </button>
                             </div>
                         </div>
 
-                        <!-- LIVE ATTENDANCE ROSTER & ENCRYPTED AUDIT LOG -->
-                        <div class="margin-top-lg">
-                            <div class="card-title-uppercase" style="font-size:0.8rem; font-weight:700; color:var(--text-secondary); margin-bottom:8px;">
-                                LIVE ATTENDANCE ROSTER & PRIVACY ENCRYPTED AUDIT LOG
+                        <!-- SEARCH & FILTERS -->
+                        <div class="roster-filter-bar">
+                            <input type="text" id="att-filter-search" class="clean-input filter-input-search" placeholder="🔍 Search staff name, ID, or Card UID..." oninput="filterAttendanceRoster()">
+                            
+                            <select id="att-filter-status" class="clean-input filter-select" onchange="filterAttendanceRoster()">
+                                <option value="ALL">All Statuses</option>
+                                <option value="CHECKED_IN">Checked In (Present)</option>
+                                <option value="CHECKED_OUT">Checked Out</option>
+                                <option value="LATE">Late Arrival</option>
+                                <option value="ON_LEAVE">On Leave</option>
+                                <option value="ABSENT">Absent</option>
+                            </select>
+
+                            <select id="att-filter-shift" class="clean-input filter-select" onchange="filterAttendanceRoster()">
+                                <option value="ALL">All Shifts / Depts</option>
+                                <option value="Morning">Morning Shift</option>
+                                <option value="Evening">Evening Shift</option>
+                                <option value="Night">Night Shift</option>
+                                <option value="ICU">ICU</option>
+                                <option value="Emergency">Emergency</option>
+                                <option value="OPD">OPD</option>
+                                <option value="Pharmacy">Pharmacy</option>
+                            </select>
+
+                            <input type="date" id="att-filter-date" class="clean-input filter-select" onchange="filterAttendanceRoster()">
+
+                            <button class="btn-table-action" onclick="resetAttendanceFilters()">
+                                Reset Filters
+                            </button>
+                        </div>
+
+                        <!-- ATTENDANCE TABLE -->
+                        <div class="table-responsive">
+                            <table class="table table-sm" id="staff-roster-table">
+                                <thead>
+                                    <tr>
+                                        <th>Staff ID</th>
+                                        <th>Staff Member</th>
+                                        <th>Role</th>
+                                        <th>Attendance Status</th>
+                                        <th>Check-In Time</th>
+                                        <th>Check-Out Time</th>
+                                        <th>Shift / Department</th>
+                                        <th>Verification Method</th>
+                                        <th>Last Updated</th>
+                                        <th style="text-align:right;">Available Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="staff-roster-tbody">
+                                    <!-- Populated dynamically -->
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- Empty State View -->
+                        <div id="staff-roster-empty" class="roster-empty-state" style="display:none;">
+                            <div class="roster-empty-icon">🔍</div>
+                            <div class="roster-empty-title">No matching attendance records found</div>
+                            <div class="roster-empty-desc">Try adjusting your search query, status filters, or date selection.</div>
+                            <button class="btn-action-primary" onclick="resetAttendanceFilters()">Reset All Filters</button>
+                        </div>
+                    </div>
+
+                    <!-- 5. PRIVACY-PRESERVED AUDIT LOG -->
+                    <div class="full-card margin-top-lg">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:10px;">
+                            <div style="display:flex; align-items:center; gap:10px;">
+                                <span style="font-size:1.3rem;">🔒</span>
+                                <div>
+                                    <h3 style="font-size:0.95rem; font-weight:700; color:var(--text-primary); margin:0;">Privacy-Preserved Attendance Audit Log</h3>
+                                    <div style="font-size:0.775rem; color:var(--text-muted);">Zero-knowledge audit trail with AES-128-CBC Fernet encryption & SHA-256 tokens</div>
+                                </div>
                             </div>
-                            <div class="table-responsive">
-                                <table class="table table-sm" id="staff-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Staff Member & Role</th>
-                                            <th>Card UID</th>
-                                            <th>Status & Shift</th>
-                                            <th>Punch In / Out</th>
-                                            <th>Verification Method</th>
-                                            <th>Fernet Ciphertext (Encrypted ID)</th>
-                                            <th>SHA-256 Token</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <!-- Populated dynamically -->
-                                    </tbody>
-                                </table>
+                            <div style="display:flex; gap:8px;">
+                                <span class="badge badge-success">Fernet Active</span>
+                                <span class="badge badge-info">Zero Raw PII</span>
+                                <span class="badge badge-primary">SHA-256 Tokens</span>
                             </div>
+                        </div>
+
+                        <div class="table-responsive">
+                            <table class="table table-sm" id="staff-audit-table">
+                                <thead>
+                                    <tr>
+                                        <th>Timestamp</th>
+                                        <th>Protected Identifier (Token & Ciphertext)</th>
+                                        <th>Attendance Action</th>
+                                        <th>Verification Method</th>
+                                        <th>Authorized Operator</th>
+                                        <th>Remarks / Notes</th>
+                                        <th>Record Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="staff-audit-tbody">
+                                    <!-- Populated dynamically -->
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </section>

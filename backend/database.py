@@ -89,6 +89,16 @@ def init_db():
         cursor.execute("ALTER TABLE staff_attendance ADD COLUMN punch_in_time TEXT")
     if "punch_out_time" not in columns:
         cursor.execute("ALTER TABLE staff_attendance ADD COLUMN punch_out_time TEXT")
+    if "shift" not in columns:
+        cursor.execute("ALTER TABLE staff_attendance ADD COLUMN shift TEXT DEFAULT 'Morning Shift (08:00 - 16:00)'")
+    if "department" not in columns:
+        cursor.execute("ALTER TABLE staff_attendance ADD COLUMN department TEXT DEFAULT 'General'")
+    if "remarks" not in columns:
+        cursor.execute("ALTER TABLE staff_attendance ADD COLUMN remarks TEXT")
+    if "operator" not in columns:
+        cursor.execute("ALTER TABLE staff_attendance ADD COLUMN operator TEXT DEFAULT 'TERMINAL-PHC-GATE1'")
+    if "updated_at" not in columns:
+        cursor.execute("ALTER TABLE staff_attendance ADD COLUMN updated_at TEXT")
 
     # 4. patient_footfall table
     cursor.execute("""
@@ -243,6 +253,9 @@ def seed_staff_members(cursor):
         ("PHC-001", "STF-103", "Dr. Rajesh Kumar", "Medical Officer in Charge", "RFID-10103"),
         ("PHC-001", "STF-104", "Vikram Singh", "Chief Pharmacist", "RFID-10104"),
         ("PHC-001", "STF-105", "Priya Verma", "Lab Technician", "RFID-10105"),
+        ("PHC-001", "STF-106", "Nurse Pooja Mehra", "Staff Nurse (OPD)", "RFID-10106"),
+        ("PHC-001", "STF-107", "Ramesh Yadav", "Emergency Transport Paramedic", "RFID-10107"),
+        ("PHC-001", "STF-108", "Dr. Alok Verma", "Pediatric Specialist", "RFID-10108"),
         ("PHC-002", "STF-201", "Nurse Kavita Rao", "Staff Nurse (General)", "RFID-20201"),
         ("PHC-002", "STF-202", "Dr. Amit Patel", "Medical Officer", "RFID-20202"),
         ("PHC-002", "STF-203", "Rohan Mehta", "Pharmacist", "RFID-20203"),
@@ -258,24 +271,27 @@ def seed_staff_members(cursor):
         """, (p_id, s_id, s_name, s_role, c_uid))
 
     raw_attendance = [
-        ("PHC-001", "STF-101", "Nurse Anita Sharma", "Senior Staff Nurse (ICU)", "RFID-10101", 1, "CHECKED_IN", "RFID Card Punch", "08:15 AM", None),
-        ("PHC-001", "STF-102", "Nurse Sunita Devi", "Staff Nurse (Emergency)", "RFID-10102", 1, "CHECKED_IN", "RFID Card Punch", "08:30 AM", None),
-        ("PHC-001", "STF-103", "Dr. Rajesh Kumar", "Medical Officer in Charge", "RFID-10103", 1, "CHECKED_IN", "RFID Card Punch", "09:00 AM", None),
-        ("PHC-001", "STF-104", "Vikram Singh", "Chief Pharmacist", "RFID-10104", 1, "CHECKED_IN", "Manual Kiosk", "08:45 AM", None),
-        ("PHC-001", "STF-105", "Priya Verma", "Lab Technician", "RFID-10105", 0, "ABSENT", "N/A", None, None),
-        ("PHC-002", "STF-201", "Nurse Kavita Rao", "Staff Nurse (General)", "RFID-20201", 1, "CHECKED_IN", "RFID Card Punch", "08:20 AM", None),
-        ("PHC-002", "STF-202", "Dr. Amit Patel", "Medical Officer", "RFID-20202", 1, "CHECKED_IN", "RFID Card Punch", "08:50 AM", None),
-        ("PHC-003", "STF-301", "Nurse Meena Kumari", "Staff Nurse", "RFID-30301", 1, "CHECKED_IN", "RFID Card Punch", "08:10 AM", None),
-        ("PHC-004", "STF-401", "Nurse Pooja Sharma", "Staff Nurse", "RFID-40401", 1, "CHECKED_IN", "RFID Card Punch", "08:25 AM", None)
+        ("PHC-001", "STF-101", "Nurse Anita Sharma", "Senior Staff Nurse (ICU)", "RFID-10101", 1, "CHECKED_IN", "RFID Card Punch", "08:15 AM", None, "Morning Shift (08:00 - 16:00)", "Intensive Care Unit (ICU)", "Routine ICU morning shift", "TERMINAL-PHC-GATE1"),
+        ("PHC-001", "STF-102", "Nurse Sunita Devi", "Staff Nurse (Emergency)", "RFID-10102", 1, "CHECKED_IN", "RFID Card Punch", "08:30 AM", None, "Morning Shift (08:00 - 16:00)", "Emergency & Trauma", "Assigned triage zone A", "TERMINAL-PHC-GATE1"),
+        ("PHC-001", "STF-103", "Dr. Rajesh Kumar", "Medical Officer in Charge", "RFID-10103", 1, "CHECKED_IN", "RFID Card Punch", "09:00 AM", None, "Morning Shift (08:00 - 16:00)", "General OPD", "Supervising clinical floor", "TERMINAL-PHC-GATE1"),
+        ("PHC-001", "STF-104", "Vikram Singh", "Chief Pharmacist", "RFID-10104", 1, "CHECKED_IN", "Manual Kiosk", "08:45 AM", None, "Morning Shift (08:00 - 16:00)", "Central Pharmacy", "Morning drug dispatch inventory", "KIOSK-MAIN-OPD"),
+        ("PHC-001", "STF-105", "Priya Verma", "Lab Technician", "RFID-10105", 0, "ABSENT", "N/A", None, None, "Morning Shift (08:00 - 16:00)", "Pathology Lab", "Unscheduled absence - cover requested", "SUPERVISOR-OVERRIDE"),
+        ("PHC-001", "STF-106", "Nurse Pooja Mehra", "Staff Nurse (OPD)", "RFID-10106", 0, "ON_LEAVE", "Supervisor Sanction", None, None, "Evening Shift (16:00 - 00:00)", "Outpatient Dept (OPD)", "Sanctioned medical leave (2 days)", "DR-RAJESH-MOIC"),
+        ("PHC-001", "STF-107", "Ramesh Yadav", "Emergency Transport Paramedic", "RFID-10107", 1, "LATE", "RFID Card Punch", "09:15 AM", None, "Morning Shift (08:00 - 16:00)", "Ambulance Logistics", "Delayed due to route diversion", "TERMINAL-PHC-GATE1"),
+        ("PHC-001", "STF-108", "Dr. Alok Verma", "Pediatric Specialist", "RFID-10108", 1, "CHECKED_OUT", "RFID Card Punch", "07:45 AM", "12:30 PM", "Morning Shift (08:00 - 16:00)", "Pediatrics", "Half-day clinic completed", "TERMINAL-PHC-GATE1"),
+        ("PHC-002", "STF-201", "Nurse Kavita Rao", "Staff Nurse (General)", "RFID-20201", 1, "CHECKED_IN", "RFID Card Punch", "08:20 AM", None, "Morning Shift (08:00 - 16:00)", "General Ward", "General nursing", "TERMINAL-PHC2-GATE"),
+        ("PHC-002", "STF-202", "Dr. Amit Patel", "Medical Officer", "RFID-20202", 1, "CHECKED_IN", "RFID Card Punch", "08:50 AM", None, "Morning Shift (08:00 - 16:00)", "OPD", "Clinical consultation", "TERMINAL-PHC2-GATE"),
+        ("PHC-003", "STF-301", "Nurse Meena Kumari", "Staff Nurse", "RFID-30301", 1, "CHECKED_IN", "RFID Card Punch", "08:10 AM", None, "Morning Shift (08:00 - 16:00)", "General Ward", "Routine ward round", "TERMINAL-PHC3-GATE"),
+        ("PHC-004", "STF-401", "Nurse Pooja Sharma", "Staff Nurse", "RFID-40401", 1, "CHECKED_IN", "RFID Card Punch", "08:25 AM", None, "Morning Shift (08:00 - 16:00)", "General Ward", "Ward coverage", "TERMINAL-PHC4-GATE")
     ]
     date_str = today.strftime("%Y-%m-%d")
-    for p_id, s_id, s_name, s_role, c_uid, pres, status, v_method, p_in, p_out in raw_attendance:
+    for p_id, s_id, s_name, s_role, c_uid, pres, status, v_method, p_in, p_out, shift, dept, remarks, oper in raw_attendance:
         enc_id = encrypt_field(s_id)
         tok_id = tokenize_identifier(s_id)
         cursor.execute("""
-        INSERT INTO staff_attendance (phc_id, staff_id, staff_name, role, card_uid, staff_id_encrypted, staff_token, present, status, verification_method, punch_in_time, punch_out_time, date)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (p_id, s_id, s_name, s_role, c_uid, enc_id, tok_id, pres, status, v_method, p_in, p_out, date_str))
+        INSERT INTO staff_attendance (phc_id, staff_id, staff_name, role, card_uid, staff_id_encrypted, staff_token, present, status, verification_method, punch_in_time, punch_out_time, date, shift, department, remarks, operator, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (p_id, s_id, s_name, s_role, c_uid, enc_id, tok_id, pres, status, v_method, p_in, p_out, date_str, shift, dept, remarks, oper, today.isoformat()))
 
 def seed_initial_data(cursor):
     today = datetime.now()

@@ -1369,3 +1369,358 @@ body {
     background: #0369A1;
     transform: translateY(-1px);
 }
+
+/* ==========================================================================
+   DEDICATED NURSE & STAFF ATTENDANCE PAGE STYLES
+   ========================================================================== */
+
+/* PHC Edge Replacement: Staff Attendance Today Summary Card */
+.staff-summary-card {
+    background: #FFFFFF;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    box-shadow: var(--card-shadow);
+}
+
+.staff-summary-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 14px;
+    margin-bottom: 16px;
+}
+
+.staff-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+}
+
+@media (max-width: 900px) {
+    .staff-summary-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (max-width: 500px) {
+    .staff-summary-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* 5-Card Overview Grid for Staff Attendance Page */
+.attendance-overview-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 14px;
+    margin-bottom: 24px;
+}
+
+@media (max-width: 1200px) {
+    .attendance-overview-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+@media (max-width: 768px) {
+    .attendance-overview-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (max-width: 480px) {
+    .attendance-overview-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.att-overview-card {
+    background: #FFFFFF;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 16px 18px;
+    box-shadow: var(--card-shadow);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: all 0.2s ease;
+}
+
+.att-overview-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.06);
+}
+
+.att-overview-card.total { border-left: 4px solid var(--accent-teal); }
+.att-overview-card.present { border-left: 4px solid var(--accent-emerald); }
+.att-overview-card.absent { border-left: 4px solid var(--accent-rose); }
+.att-overview-card.leave { border-left: 4px solid var(--accent-amber); }
+.att-overview-card.onduty { border-left: 4px solid var(--accent-blue); }
+
+.att-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.att-card-title {
+    font-size: 0.725rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+.att-card-icon {
+    font-size: 1.25rem;
+}
+
+.att-card-value {
+    font-size: 1.85rem;
+    font-weight: 800;
+    color: var(--text-primary);
+    line-height: 1.1;
+    font-family: var(--font-sans);
+}
+
+.att-card-value .unit {
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    margin-left: 4px;
+}
+
+.att-card-sub {
+    font-size: 0.75rem;
+    margin-top: 6px;
+    font-weight: 500;
+}
+
+/* Status Badges */
+.badge-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 0.725rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
+
+.badge-present {
+    background: #DCFCE7;
+    color: #15803D;
+    border: 1px solid #86EFAC;
+}
+
+.badge-checked-out {
+    background: #E0F2FE;
+    color: #0369A1;
+    border: 1px solid #7DD3FC;
+}
+
+.badge-absent {
+    background: #FEE2E2;
+    color: #B91C1C;
+    border: 1px solid #FCA5A5;
+}
+
+.badge-leave {
+    background: #FEF3C7;
+    color: #B45309;
+    border: 1px solid #FCD34D;
+}
+
+.badge-late {
+    background: #EDE9FE;
+    color: #6D28D9;
+    border: 1px solid #C4B5FD;
+}
+
+/* Search & Filter Bar */
+.roster-filter-bar {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+    background: #F8FAFC;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 12px 16px;
+    margin-bottom: 16px;
+}
+
+.filter-input-search {
+    flex: 2;
+    min-width: 220px;
+}
+
+.filter-select {
+    flex: 1;
+    min-width: 140px;
+}
+
+/* Duplicate Scan Prevention Banner */
+.duplicate-warning-banner {
+    background: #FEF3C7;
+    border: 1px solid #F59E0B;
+    color: #92400E;
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    font-size: 0.825rem;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    animation: fadeInSlide 0.3s ease;
+}
+
+@keyframes fadeInSlide {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* Verification Result Card */
+.verification-result-box {
+    background: #020617;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    animation: fadeInSlide 0.3s ease;
+}
+
+.verification-avatar {
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    background: #0F766E;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 1rem;
+}
+
+.verification-details {
+    flex: 1;
+    text-align: left;
+}
+
+.verification-name {
+    font-size: 0.875rem;
+    font-weight: 700;
+    color: #F8FAFC;
+}
+
+.verification-meta {
+    font-size: 0.75rem;
+    color: #94A3B8;
+}
+
+/* Empty State */
+.roster-empty-state {
+    text-align: center;
+    padding: 48px 20px;
+    background: #F8FAFC;
+    border: 1px dashed var(--border-highlight);
+    border-radius: var(--radius-md);
+    margin: 16px 0;
+}
+
+.roster-empty-icon {
+    font-size: 2.5rem;
+    margin-bottom: 10px;
+}
+
+.roster-empty-title {
+    font-weight: 700;
+    color: var(--text-primary);
+    font-size: 1rem;
+    margin-bottom: 4px;
+}
+
+.roster-empty-desc {
+    color: var(--text-muted);
+    font-size: 0.825rem;
+    margin-bottom: 14px;
+}
+
+/* Table Actions */
+.btn-table-action {
+    background: transparent;
+    border: 1px solid var(--border-highlight);
+    color: var(--text-secondary);
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 0.725rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.btn-table-action:hover {
+    background: var(--bg-card-hover);
+    color: var(--text-primary);
+    border-color: var(--text-muted);
+}
+
+.btn-table-action.danger {
+    color: var(--accent-rose);
+    border-color: #FECACA;
+}
+
+.btn-table-action.danger:hover {
+    background: #FEF2F2;
+    border-color: var(--accent-rose);
+}
+
+.btn-table-action.primary {
+    color: var(--accent-teal);
+    border-color: #99F6E4;
+}
+
+.btn-table-action.primary:hover {
+    background: #F0FDFA;
+    border-color: var(--accent-teal);
+}
+
+/* Inline Notification Toast */
+.att-inline-alert {
+    padding: 10px 14px;
+    border-radius: 6px;
+    font-size: 0.825rem;
+    font-weight: 500;
+    margin-top: 10px;
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.att-inline-alert.success {
+    display: flex;
+    background: #F0FDF4;
+    border: 1px solid #86EFAC;
+    color: #166534;
+}
+
+.att-inline-alert.error {
+    display: flex;
+    background: #FEF2F2;
+    border: 1px solid #FCA5A5;
+    color: #991B1B;
+}
+

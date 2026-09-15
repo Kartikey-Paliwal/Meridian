@@ -183,9 +183,19 @@ def run_tests():
     print("\n--- 8. REDISTRIBUTION 10-STEP LIFECYCLE & INVENTORY RECONCILIATION ---")
     s_beta, res_beta = login("staff.beta@meridian.health", "Staff@123")
     
-    # Check baseline inventory before transfer
+    # Ensure Beta has sufficient surplus stock before transfer test
     r_beta_inv = s_beta.get(f"{BASE_URL}/api/inventory")
     beta_med = next((m for m in r_beta_inv.json() if m["medicine_name"] == "Paracetamol 500mg"), None)
+    if not beta_med or beta_med["quantity"] < 250:
+        s_beta.post(f"{BASE_URL}/api/inventory/receive", json={
+            "medicine_name": "Paracetamol 500mg",
+            "quantity": 250,
+            "batch_number": "TEST-TOPUP-01",
+            "source": "State Central Warehouse"
+        })
+        r_beta_inv = s_beta.get(f"{BASE_URL}/api/inventory")
+        beta_med = next((m for m in r_beta_inv.json() if m["medicine_name"] == "Paracetamol 500mg"), None)
+
     beta_initial_qty = beta_med["quantity"] if beta_med else 280
 
     r_alpha_inv = s_alpha.get(f"{BASE_URL}/api/inventory")
@@ -208,9 +218,10 @@ def run_tests():
     assert_test(r_self_approve.status_code == 403, "PHC Staff cannot self-approve transfer request (returns 403)")
 
     # 8.3 Safe Stock Protection: Approving excessive quantity that pushes donor below safe par level
+    unsafe_qty = beta_initial_qty - 40  # Leaves 40 units < par level 100
     r_unsafe_review = s_onorth.post(f"{BASE_URL}/api/redistribution/{new_tr_id}/review", json={
         "action": "MODIFY_AND_APPROVE",
-        "modified_quantity": 250, # Beta has 280, par level is 100, so 280 - 250 = 30 < 100 par!
+        "modified_quantity": unsafe_qty,
         "decision_reason": "Attempted excessive allocation"
     })
     assert_test(r_unsafe_review.status_code == 400,

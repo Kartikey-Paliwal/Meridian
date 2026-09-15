@@ -9,8 +9,9 @@ from backend.privacy import encrypt_field, tokenize_identifier
 DB_PATH = os.path.join(os.path.dirname(__file__), "meridian.db")
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 30000")
     return conn
 
 def hash_password(password: str, salt: str = None) -> tuple:
@@ -30,6 +31,7 @@ def verify_password(password: str, pwd_hash: str, salt: str) -> bool:
 def init_db():
     conn = get_db_connection()
     cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode = WAL")
 
     # 1. districts table
     cursor.execute("""

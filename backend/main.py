@@ -1267,9 +1267,10 @@ def log_footfall(
 # 5. DASHBOARDS (ROLE-SPECIFIC & SCOPED)
 # ---------------------------------------------------------
 
+@app.get("/api/dashboard/phc", tags=["2. PHC Dashboard"])
 @app.get("/api/dashboard/phc/{phc_id}", tags=["2. PHC Dashboard"])
 def get_phc_dashboard(
-    phc_id: str,
+    phc_id: Optional[str] = None,
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
@@ -1278,7 +1279,9 @@ def get_phc_dashboard(
     District Officer only accesses facilities inside their district,
     and National Admin has read-only/oversight capability.
     """
-    enforce_phc_scope(current_user, phc_id)
+    target_phc = phc_id or current_user.get("assigned_phc_id") or "PHC-001"
+    enforce_phc_scope(current_user, target_phc)
+    phc_id = target_phc
 
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -1984,6 +1987,13 @@ def confirm_transfer_dispatch(
         conn.close()
         raise HTTPException(status_code=403, detail="Only staff at the donor PHC can confirm dispatch.")
 
+    if t["status"] != "Approved":
+        conn.close()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Transfer #{transfer_id} cannot be dispatched because its status is '{t['status']}' (must be 'Approved')."
+        )
+
     now_iso = datetime.now().isoformat()
     cursor.execute("""
     UPDATE redistribution_transfers SET 
@@ -2044,6 +2054,13 @@ def confirm_transfer_delivery(
     if current_user["role"] == "PHC_STAFF" and current_user["assigned_phc_id"] != t["target_phc"]:
         conn.close()
         raise HTTPException(status_code=403, detail="Only staff at the recipient PHC can confirm delivery.")
+
+    if t["status"] != "In Transit":
+        conn.close()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Transfer #{transfer_id} cannot be delivered because its status is '{t['status']}' (must be 'In Transit')."
+        )
 
     now_iso = datetime.now().isoformat()
     delivered_qty = req.received_quantity if req.received_quantity and req.received_quantity > 0 else t["quantity"]

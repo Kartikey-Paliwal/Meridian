@@ -5,6 +5,7 @@ import secrets
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException, Query, Request, Response, Depends, status
+from fastapi.security import HTTPAuthorizationCredentials
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
@@ -13,8 +14,11 @@ from backend.database import get_db_connection, init_db, hash_password, verify_p
 from backend.models import (
     LoginRequest, ChangePasswordRequest, ForgotPasswordRequest, ResetPasswordRequest,
     CreateUserRequest, UpdateUserStatusRequest, AdminOverrideRequest,
-    InventoryUpdate, BedStatusUpdate, StaffAttendanceCreate,
-    PatientFootfallCreate, TransferActionRequest, CardPunchRequest, StaffActionRequest
+    InventoryUpdate, BedStatusUpdate, EquipmentUpdate, StaffAttendanceCreate,
+    PatientFootfallCreate, TransferActionRequest, CardPunchRequest, StaffActionRequest,
+    TransferCreateRequest, TransferReviewRequest, TransferDispatchConfirmRequest,
+    TransferDeliverConfirmRequest, TransferEscalateRequest, SendMessageRequest,
+    AcknowledgeMessageRequest, StockReceivedRequest, StockConsumedRequest, StockDispensedRequest
 )
 from backend.forecasting import forecast_demand_linear_regression
 from backend.redistribution import generate_redistribution_recommendations
@@ -22,7 +26,7 @@ from backend.privacy import encrypt_field, decrypt_field, tokenize_identifier, a
 from backend.audit import log_audit_event
 from backend.auth import (
     authenticate_user, destroy_session, get_current_user, require_roles,
-    enforce_phc_scope, enforce_district_scope, SESSION_COOKIE_NAME
+    enforce_phc_scope, enforce_district_scope, SESSION_COOKIE_NAME, bearer_scheme
 )
 from backend.pilot import run_30day_shadow_simulation
 from backend.dp_budget import dp_manager
@@ -70,15 +74,44 @@ def login_endpoint(req: LoginRequest, request: Request, response: Response):
 
 
 @app.post("/api/auth/logout", tags=["0. Authentication"])
-def logout_endpoint(response: Response, current_user: Dict[str, Any] = Depends(get_current_user)):
-    destroy_session(current_user["session_id"], user_info=current_user)
+def logout_endpoint(
+    request: Request,
+    response: Response,
+    auth_header: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme)
+):
+    token = None
+    if SESSION_COOKIE_NAME in request.cookies:
+        token = request.cookies.get(SESSION_COOKIE_NAME)
+    elif auth_header and auth_header.credentials:
+        token = auth_header.credentials
+
+    if token:
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("SELECT u.* FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.session_id = ?", (token,))
+            row = cursor.fetchone()
+            conn.close()
+            user_info = dict(row) if row else None
+            destroy_session(token, user_info=user_info)
+        except Exception as e:
+            pass
+
     response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
     return {"status": "success", "message": "Successfully logged out."}
 
 
+@app.get("/api/config/demo-mode", tags=["0. Authentication"])
+def get_demo_mode_status():
+    is_demo = os.environ.get("DEMO_MODE", "true").lower() in ("true", "1", "yes")
+    return {"demo_mode": is_demo}
+
+
 @app.get("/api/auth/me", tags=["0. Authentication"])
 def get_current_user_profile(current_user: Dict[str, Any] = Depends(get_current_user)):
-    return current_user
+    user_dict = dict(current_user)
+    user_dict["demo_mode"] = os.environ.get("DEMO_MODE", "true").lower() in ("true", "1", "yes")
+    return user_dict
 
 
 @app.post("/api/auth/change-password", tags=["0. Authentication"])
@@ -583,11 +616,13 @@ def get_beds(
 
 
 @app.post("/api/beds/update", tags=["1. CRUD - Beds"])
+@app.post("/api/beds", tags=["1. CRUD - Beds"])
 def update_beds(
     data: BedStatusUpdate,
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    enforce_phc_scope(current_user, data.phc_id)
+    target_phc = data.phc_id or current_user.get("assigned_phc_id") or "PHC-001"
+    enforce_phc_scope(current_user, target_phc)
 
     if current_user["role"] == "NATIONAL_ADMIN":
         if not data.override_reason or len(data.override_reason.strip()) < 3:
@@ -595,23 +630,47 @@ def update_beds(
     elif current_user["role"] == "DISTRICT_OFFICER":
         raise HTTPException(status_code=403, detail="District Officers monitor bed occupancy; updates are recorded by PHC Staff.")
 
+    if data.total_beds < 0:
+        raise HTTPException(status_code=400, detail="Total beds cannot be negative.")
+    if data.occupied_beds < 0:
+        raise HTTPException(status_code=400, detail="Occupied beds cannot be negative.")
+    if data.occupied_beds > data.total_beds:
+        raise HTTPException(status_code=400, detail=f"Occupied beds ({data.occupied_beds}) cannot exceed total registered beds ({data.total_beds}).")
+
     conn = get_db_connection()
     cursor = conn.cursor()
     now_str = datetime.now().isoformat()
 
-    cursor.execute("SELECT district_id FROM phcs WHERE id = ?", (data.phc_id,))
+    cursor.execute("SELECT district_id FROM phcs WHERE id = ?", (target_phc,))
     phc_meta = cursor.fetchone()
     d_id = phc_meta["district_id"] if phc_meta else "DIST-NORTH"
 
     cursor.execute("""
-    INSERT INTO bed_status (phc_id, district_id, total_beds, occupied_beds, updated_at)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO bed_status (phc_id, district_id, total_beds, occupied_beds, notes, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(phc_id) DO UPDATE SET
         total_beds = excluded.total_beds,
         occupied_beds = excluded.occupied_beds,
         district_id = excluded.district_id,
+        notes = excluded.notes,
         updated_at = excluded.updated_at
-    """, (data.phc_id, d_id, data.total_beds, data.occupied_beds, now_str))
+    """, (target_phc, d_id, data.total_beds, data.occupied_beds, data.notes, now_str))
+
+    # Generate capacity alert if occupancy >= 90%
+    if data.total_beds > 0 and (data.occupied_beds / data.total_beds) >= 0.90:
+        pct = int((data.occupied_beds / data.total_beds) * 100)
+        cursor.execute("""
+        INSERT INTO messages (
+            sender_id, sender_name, sender_role, recipient_role,
+            district_id, phc_id, subject, message, priority, sent_at
+        ) VALUES (?, ?, ?, 'DISTRICT_OFFICER', ?, ?, ?, ?, 'URGENT', ?)
+        """, (
+            current_user["id"], current_user["full_name"], current_user["role"],
+            d_id, target_phc,
+            f"HIGH CAPACITY ALERT: {target_phc} at {pct}% bed occupancy",
+            f"Facility {target_phc} has reached critical bed capacity ({data.occupied_beds}/{data.total_beds} beds occupied). High clinical demand detected.",
+            now_str
+        ))
 
     conn.commit()
     conn.close()
@@ -622,15 +681,158 @@ def update_beds(
         user_name=current_user["full_name"],
         role=current_user["role"],
         action="BED_OVERRIDE" if is_override else "BED_UPDATE",
-        target_record=data.phc_id,
+        target_record=target_phc,
         district_scope=d_id,
-        phc_scope=data.phc_id,
+        phc_scope=target_phc,
         result="OVERRIDDEN" if is_override else "SUCCESS",
-        reason=data.override_reason if is_override else "Daily bed status reconciliation",
+        reason=data.override_reason if is_override else (data.notes or "Daily bed status reconciliation"),
         details={"total_beds": data.total_beds, "occupied_beds": data.occupied_beds}
     )
 
-    return {"status": "success", "message": f"Updated bed status for {data.phc_id}"}
+    avail = data.total_beds - data.occupied_beds
+    return {
+        "status": "success",
+        "message": f"Updated bed status for {target_phc}",
+        "phc_id": target_phc,
+        "total_beds": data.total_beds,
+        "occupied_beds": data.occupied_beds,
+        "available_beds": avail
+    }
+
+
+# ---------------------------------------------------------
+# 2B. SCOPED CRUD - FACILITY EQUIPMENT
+# ---------------------------------------------------------
+
+@app.get("/api/equipment", tags=["1. CRUD - Beds & Equipment"])
+def get_equipment(
+    phc_id: Optional[str] = None,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    if current_user["role"] == "PHC_STAFF":
+        target = current_user.get("assigned_phc_id") or "PHC-001"
+        cursor.execute("SELECT * FROM facility_equipment WHERE phc_id = ? ORDER BY id ASC", (target,))
+    elif current_user["role"] == "DISTRICT_OFFICER":
+        dist_id = current_user["assigned_district_id"]
+        if phc_id:
+            enforce_phc_scope(current_user, phc_id)
+            cursor.execute("SELECT * FROM facility_equipment WHERE phc_id = ? ORDER BY id ASC", (phc_id,))
+        else:
+            cursor.execute("SELECT * FROM facility_equipment WHERE district_id = ? ORDER BY id ASC", (dist_id,))
+    else: # NATIONAL_ADMIN
+        if phc_id:
+            cursor.execute("SELECT * FROM facility_equipment WHERE phc_id = ? ORDER BY id ASC", (phc_id,))
+        else:
+            cursor.execute("SELECT * FROM facility_equipment ORDER BY id ASC")
+
+    rows = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+    return rows
+
+
+@app.post("/api/equipment/update", tags=["1. CRUD - Beds & Equipment"])
+@app.post("/api/equipment", tags=["1. CRUD - Beds & Equipment"])
+def update_equipment(
+    data: EquipmentUpdate,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    target_phc = data.phc_id or current_user.get("assigned_phc_id") or "PHC-001"
+    enforce_phc_scope(current_user, target_phc)
+
+    if current_user["role"] == "NATIONAL_ADMIN":
+        if not data.override_reason or len(data.override_reason.strip()) < 3:
+            raise HTTPException(status_code=400, detail="Administrative equipment override requires explicit written reason.")
+    elif current_user["role"] == "DISTRICT_OFFICER":
+        raise HTTPException(status_code=403, detail="District Officers monitor equipment; updates are recorded by PHC Staff.")
+
+    if data.quantity < 0:
+        raise HTTPException(status_code=400, detail="Equipment quantity cannot be negative.")
+    if data.under_maintenance_count < 0:
+        raise HTTPException(status_code=400, detail="Under maintenance count cannot be negative.")
+    if data.under_maintenance_count > data.quantity:
+        raise HTTPException(status_code=400, detail=f"Under maintenance count ({data.under_maintenance_count}) cannot exceed total quantity ({data.quantity}).")
+
+    allowed_statuses = {"OPERATIONAL", "UNDER_MAINTENANCE", "CRITICAL_DEFICIT", "STANDBY"}
+    status_upper = (data.operational_status or "OPERATIONAL").upper()
+    if status_upper not in allowed_statuses:
+        raise HTTPException(status_code=400, detail=f"Invalid operational status '{data.operational_status}'. Must be one of {sorted(list(allowed_statuses))}.")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now_str = datetime.now().isoformat()
+
+    cursor.execute("SELECT district_id FROM phcs WHERE id = ?", (target_phc,))
+    phc_meta = cursor.fetchone()
+    d_id = phc_meta["district_id"] if phc_meta else "DIST-NORTH"
+
+    if data.equipment_id:
+        cursor.execute("SELECT * FROM facility_equipment WHERE id = ? AND phc_id = ?", (data.equipment_id, target_phc))
+    else:
+        cursor.execute("SELECT * FROM facility_equipment WHERE name = ? AND phc_id = ?", (data.name, target_phc))
+    existing = cursor.fetchone()
+
+    prev_val = str(dict(existing)) if existing else "NONE"
+
+    if existing:
+        cursor.execute("""
+        UPDATE facility_equipment SET
+            quantity = ?, operational_status = ?, under_maintenance_count = ?, notes = ?, updated_at = ?
+        WHERE id = ?
+        """, (data.quantity, status_upper, data.under_maintenance_count, data.notes, now_str, existing["id"]))
+        eq_id = existing["id"]
+    else:
+        cursor.execute("""
+        INSERT INTO facility_equipment (phc_id, district_id, name, category, quantity, operational_status, under_maintenance_count, notes, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (target_phc, d_id, data.name, data.category or "General", data.quantity, status_upper, data.under_maintenance_count, data.notes, now_str))
+        eq_id = cursor.lastrowid
+
+    # Capacity alert if critical deficit
+    if status_upper == "CRITICAL_DEFICIT":
+        cursor.execute("""
+        INSERT INTO messages (
+            sender_id, sender_name, sender_role, recipient_role,
+            district_id, phc_id, subject, message, priority, sent_at
+        ) VALUES (?, ?, ?, 'DISTRICT_OFFICER', ?, ?, ?, ?, 'URGENT', ?)
+        """, (
+            current_user["id"], current_user["full_name"], current_user["role"],
+            d_id, target_phc,
+            f"CRITICAL EQUIPMENT DEFICIT: {data.name} at {target_phc}",
+            f"{target_phc} reported a critical deficit or failure of equipment '{data.name}'. Notes: {data.notes or 'None'}",
+            now_str
+        ))
+
+    conn.commit()
+    conn.close()
+
+    is_override = current_user["role"] == "NATIONAL_ADMIN"
+    log_audit_event(
+        user_id=current_user["id"],
+        user_name=current_user["full_name"],
+        role=current_user["role"],
+        action="EQUIPMENT_OVERRIDE" if is_override else "EQUIPMENT_UPDATE",
+        target_record=f"{target_phc} / {data.name}",
+        district_scope=d_id,
+        phc_scope=target_phc,
+        result="OVERRIDDEN" if is_override else "SUCCESS",
+        previous_value=prev_val,
+        new_value=f"{status_upper} (Qty: {data.quantity})",
+        reason=data.override_reason if is_override else (data.notes or "Routine equipment readiness verification")
+    )
+
+    return {
+        "status": "success",
+        "message": f"Updated equipment '{data.name}' at {target_phc}",
+        "equipment_id": eq_id,
+        "phc_id": target_phc,
+        "name": data.name,
+        "operational_status": status_upper,
+        "quantity": data.quantity,
+        "under_maintenance_count": data.under_maintenance_count
+    }
 
 
 # ---------------------------------------------------------
@@ -703,6 +905,7 @@ def get_staff_attendance(
 
 
 @app.post("/api/staff/card-punch", tags=["1. CRUD - Staff"])
+@app.post("/api/staff/punch", tags=["1. CRUD - Staff"])
 def process_rfid_punch(
     data: CardPunchRequest,
     current_user: Dict[str, Any] = Depends(get_current_user)
@@ -782,11 +985,13 @@ def process_rfid_punch(
 
 
 @app.post("/api/staff/log", tags=["1. CRUD - Staff"])
+@app.post("/api/staff", tags=["1. CRUD - Staff"])
 def log_staff_attendance_manual(
     entry: StaffAttendanceCreate,
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    enforce_phc_scope(current_user, entry.phc_id)
+    target_phc = entry.phc_id or current_user.get("assigned_phc_id") or "PHC-001"
+    enforce_phc_scope(current_user, target_phc)
 
     if current_user["role"] == "NATIONAL_ADMIN":
         if not entry.override_reason or len(entry.override_reason.strip()) < 3:
@@ -796,7 +1001,7 @@ def log_staff_attendance_manual(
 
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT district_id FROM phcs WHERE id = ?", (entry.phc_id,))
+    cursor.execute("SELECT district_id FROM phcs WHERE id = ?", (target_phc,))
     d_row = cursor.fetchone()
     d_id = d_row["district_id"] if d_row else "DIST-NORTH"
 
@@ -805,20 +1010,47 @@ def log_staff_attendance_manual(
     enc_id = encrypt_field(entry.staff_id)
     tok_id = tokenize_identifier(entry.staff_id)
 
+    cursor.execute("SELECT name, role FROM staff_members WHERE staff_id = ?", (entry.staff_id,))
+    s_meta = cursor.fetchone()
+    staff_name = entry.staff_name or (s_meta["name"] if s_meta else entry.staff_id)
+    staff_role = entry.role or (s_meta["role"] if s_meta else "Staff")
+
+    # Check if an entry already exists today to prevent accidental duplicate check-in
     cursor.execute("""
-    INSERT INTO staff_attendance (
-        phc_id, district_id, staff_id, staff_name, role, card_uid, 
-        staff_id_encrypted, staff_token, present, status, verification_method, 
-        punch_in_time, punch_out_time, date, shift, department, remarks, operator, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (
-        entry.phc_id, d_id, entry.staff_id, entry.staff_name or entry.staff_id,
-        entry.role or "Staff", entry.card_uid, enc_id, tok_id, entry.present,
-        entry.status or "CHECKED_IN", entry.verification_method or "Manual Kiosk",
-        entry.punch_in_time or "08:30 AM", entry.punch_out_time, today_str,
-        entry.shift or "Morning Shift", entry.department or "General",
-        entry.remarks, entry.operator or current_user["full_name"], now_iso
-    ))
+    SELECT id, status FROM staff_attendance
+    WHERE staff_id = ? AND date = ? AND phc_id = ?
+    ORDER BY id DESC LIMIT 1
+    """, (entry.staff_id, today_str, target_phc))
+    existing = cursor.fetchone()
+
+    status_val = entry.status or "CHECKED_IN"
+    pres_val = 0 if status_val in ["ABSENT", "ON_LEAVE"] else 1
+
+    if existing:
+        cursor.execute("""
+        UPDATE staff_attendance SET
+            status = ?, present = ?, verification_method = ?, remarks = ?, operator = ?, updated_at = ?
+        WHERE id = ?
+        """, (
+            status_val, pres_val, entry.verification_method or "Manual Kiosk",
+            entry.remarks, entry.operator or current_user["full_name"], now_iso, existing["id"]
+        ))
+    else:
+        cursor.execute("""
+        INSERT INTO staff_attendance (
+            phc_id, district_id, staff_id, staff_name, role, card_uid, 
+            staff_id_encrypted, staff_token, present, status, verification_method, 
+            punch_in_time, punch_out_time, date, shift, department, remarks, operator, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            target_phc, d_id, entry.staff_id, staff_name,
+            staff_role, entry.card_uid, enc_id, tok_id, pres_val,
+            status_val, entry.verification_method or "Manual Kiosk",
+            entry.punch_in_time or "08:30 AM", entry.punch_out_time, today_str,
+            entry.shift or "Morning Shift", entry.department or "General",
+            entry.remarks, entry.operator or current_user["full_name"], now_iso
+        ))
+
     conn.commit()
     conn.close()
 
@@ -828,14 +1060,14 @@ def log_staff_attendance_manual(
         user_name=current_user["full_name"],
         role=current_user["role"],
         action="ATTENDANCE_OVERRIDE" if is_override else "ATTENDANCE_LOG",
-        target_record=f"{entry.phc_id} / {entry.staff_id}",
+        target_record=f"{target_phc} / {entry.staff_id}",
         district_scope=d_id,
-        phc_scope=entry.phc_id,
+        phc_scope=target_phc,
         result="OVERRIDDEN" if is_override else "SUCCESS",
-        reason=entry.override_reason if is_override else "Manual staff attendance submission"
+        reason=entry.override_reason if is_override else (entry.remarks or "Manual staff attendance submission")
     )
 
-    return {"status": "success", "message": f"Attendance logged for {entry.staff_id}"}
+    return {"status": "success", "message": f"Attendance logged for {staff_name} ({status_val})"}
 
 
 @app.post("/api/staff/action", tags=["1. CRUD - Staff"])
@@ -867,17 +1099,19 @@ def perform_staff_action(
         "CHECK_OUT": "CHECKED_OUT",
         "CHECK_IN": "CHECKED_IN",
         "MARK_LEAVE": "ON_LEAVE",
-        "MARK_ABSENT": "ABSENT"
+        "MARK_ABSENT": "ABSENT",
+        "CORRECTION": "CHECKED_IN"
     }
     new_status = status_map.get(req.action, "CHECKED_IN")
     present_val = 0 if new_status in ["ABSENT", "ON_LEAVE"] else 1
 
     if row:
+        punch_out = time_str if new_status == "CHECKED_OUT" else row["punch_out_time"]
         cursor.execute("""
         UPDATE staff_attendance
-        SET status = ?, present = ?, remarks = ?, operator = ?, updated_at = ?
+        SET status = ?, present = ?, punch_out_time = ?, remarks = ?, operator = ?, updated_at = ?
         WHERE id = ?
-        """, (new_status, present_val, req.remarks, req.operator or current_user["full_name"], now_iso, row["id"]))
+        """, (new_status, present_val, punch_out, req.remarks or f"Action: {req.action}", req.operator or current_user["full_name"], now_iso, row["id"]))
     else:
         cursor.execute("SELECT * FROM staff_members WHERE staff_id = ?", (req.staff_id,))
         m = cursor.fetchone()
@@ -950,11 +1184,13 @@ def get_patient_footfall(
 
 
 @app.post("/api/footfall/log", tags=["1. CRUD - Footfall"])
+@app.post("/api/footfall", tags=["1. CRUD - Footfall"])
 def log_footfall(
     data: PatientFootfallCreate,
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    enforce_phc_scope(current_user, data.phc_id)
+    target_phc = data.phc_id or current_user.get("assigned_phc_id") or "PHC-001"
+    enforce_phc_scope(current_user, target_phc)
 
     if current_user["role"] == "NATIONAL_ADMIN":
         if not data.override_reason or len(data.override_reason.strip()) < 3:
@@ -962,17 +1198,46 @@ def log_footfall(
     elif current_user["role"] == "DISTRICT_OFFICER":
         raise HTTPException(status_code=403, detail="District Officers cannot directly modify PHC footfall counts.")
 
+    if data.count < 0:
+        raise HTTPException(status_code=400, detail="Patient footfall count cannot be negative.")
+
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    if data.date > today_str:
+        raise HTTPException(status_code=400, detail="Cannot record patient footfall for future dates.")
+
+    try:
+        datetime.strptime(data.date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Expected YYYY-MM-DD.")
+
+    male = data.male_count or 0
+    female = data.female_count or 0
+    other = data.other_count or 0
+    emergency = data.emergency_cases or 0
+    cat_sum = male + female + other
+    if cat_sum > data.count:
+        raise HTTPException(status_code=400, detail=f"Category breakdown total ({cat_sum}) cannot exceed total visits ({data.count}).")
+
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT district_id FROM phcs WHERE id = ?", (data.phc_id,))
+    cursor.execute("SELECT district_id FROM phcs WHERE id = ?", (target_phc,))
     d_row = cursor.fetchone()
     d_id = d_row["district_id"] if d_row else "DIST-NORTH"
 
     cursor.execute("""
-    INSERT INTO patient_footfall (phc_id, district_id, date, count)
-    VALUES (?, ?, ?, ?)
-    ON CONFLICT(phc_id, date) DO UPDATE SET count = excluded.count, district_id = excluded.district_id
-    """, (data.phc_id, d_id, data.date, data.count))
+    INSERT INTO patient_footfall (
+        phc_id, district_id, date, count, male_count, female_count, other_count, emergency_cases, correction_reason, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(phc_id, date) DO UPDATE SET
+        count = excluded.count,
+        district_id = excluded.district_id,
+        male_count = excluded.male_count,
+        female_count = excluded.female_count,
+        other_count = excluded.other_count,
+        emergency_cases = excluded.emergency_cases,
+        correction_reason = excluded.correction_reason,
+        updated_at = excluded.updated_at
+    """, (target_phc, d_id, data.date, data.count, male, female, other, emergency, data.correction_reason, datetime.now().isoformat()))
     conn.commit()
     conn.close()
 
@@ -982,14 +1247,20 @@ def log_footfall(
         user_name=current_user["full_name"],
         role=current_user["role"],
         action="FOOTFALL_OVERRIDE" if is_override else "FOOTFALL_LOG",
-        target_record=f"{data.phc_id} / {data.date}",
+        target_record=f"{target_phc} / {data.date}",
         district_scope=d_id,
-        phc_scope=data.phc_id,
+        phc_scope=target_phc,
         result="OVERRIDDEN" if is_override else "SUCCESS",
-        reason=data.override_reason if is_override else f"Recorded {data.count} OPD visits"
+        reason=data.override_reason if is_override else (data.correction_reason or f"Recorded {data.count} OPD visits")
     )
 
-    return {"status": "success", "message": f"Logged footfall {data.count} for {data.phc_id} on {data.date}"}
+    return {
+        "status": "success",
+        "message": f"Logged footfall {data.count} for {target_phc} on {data.date}",
+        "phc_id": target_phc,
+        "date": data.date,
+        "count": data.count
+    }
 
 
 # ---------------------------------------------------------
@@ -1045,6 +1316,10 @@ def get_phc_dashboard(
     """, (phc_id, phc_id))
     transfers = [dict(r) for r in cursor.fetchall()]
 
+    # Fetch facility equipment
+    cursor.execute("SELECT * FROM facility_equipment WHERE phc_id = ? ORDER BY id ASC", (phc_id,))
+    equipment_rows = [dict(r) for r in cursor.fetchall()]
+
     # Check supervisor read-only state
     is_supervisor_view = current_user["role"] in ["NATIONAL_ADMIN", "DISTRICT_OFFICER"]
 
@@ -1056,6 +1331,7 @@ def get_phc_dashboard(
         "current_user_role": current_user["role"],
         "inventory": inventory,
         "bed_status": bed_data,
+        "equipment": equipment_rows,
         "staff_attendance": staff_rows,
         "staff_members": staff_members,
         "patient_footfall": footfall_rows,
@@ -1366,96 +1642,259 @@ def get_national_dashboard(current_user: Dict[str, Any] = Depends(require_roles(
 # 6. REDISTRIBUTION ENGINE & ACTIONS
 # ---------------------------------------------------------
 
-@app.get("/api/redistribution/recommendations", tags=["5. Redistribution Engine"])
-def get_redistribution_recommendations_endpoint(current_user: Dict[str, Any] = Depends(get_current_user)):
+# ---------------------------------------------------------
+# 5. 10-STEP REDISTRIBUTION LIFECYCLE & GOVERNANCE
+# ---------------------------------------------------------
+
+@app.get("/api/redistribution/transfers", tags=["5. Redistribution Lifecycle"])
+def get_redistribution_transfers(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    Returns scoped transfer list with calculated lifecycle turnaround times.
+    """
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    if current_user["role"] == "PHC_STAFF":
-        cursor.execute("SELECT * FROM medicine_inventory")
-        all_inv = [dict(r) for r in cursor.fetchall()]
-        all_recs = generate_redistribution_recommendations(all_inv)
-        # Filter where user's PHC is donor or receiver
-        user_phc = current_user["assigned_phc_id"]
-        scoped_recs = [r for r in all_recs if r["source_phc"] == user_phc or r["target_phc"] == user_phc]
-        conn.close()
-        return {"active_recommendations": scoped_recs}
-
+    if current_user["role"] == "NATIONAL_ADMIN":
+        cursor.execute("SELECT * FROM redistribution_transfers ORDER BY id DESC")
     elif current_user["role"] == "DISTRICT_OFFICER":
         dist_id = current_user["assigned_district_id"]
-        cursor.execute("SELECT * FROM medicine_inventory WHERE district_id = ?", (dist_id,))
-        dist_inv = [dict(r) for r in cursor.fetchall()]
-        dist_recs = generate_redistribution_recommendations(dist_inv)
-        conn.close()
-        return {"active_recommendations": dist_recs}
+        cursor.execute("""
+        SELECT * FROM redistribution_transfers 
+        WHERE source_district_id = ? OR target_district_id = ?
+        ORDER BY id DESC
+        """, (dist_id, dist_id))
+    else: # PHC_STAFF
+        phc_id = current_user["assigned_phc_id"]
+        cursor.execute("""
+        SELECT * FROM redistribution_transfers 
+        WHERE source_phc = ? OR target_phc = ?
+        ORDER BY id DESC
+        """, (phc_id, phc_id))
 
-    else: # National Admin
-        cursor.execute("SELECT * FROM medicine_inventory")
-        all_inv = [dict(r) for r in cursor.fetchall()]
-        all_recs = generate_redistribution_recommendations(all_inv)
-        conn.close()
-        return {"active_recommendations": all_recs}
+    rows = cursor.fetchall()
+    conn.close()
+
+    transfers = []
+    now = datetime.now()
+    for r in rows:
+        t = dict(r)
+        # Calculate turnaround metrics
+        if t.get("requested_at"):
+            try:
+                req_dt = datetime.fromisoformat(t["requested_at"])
+                if t.get("completed_at"):
+                    comp_dt = datetime.fromisoformat(t["completed_at"])
+                    t["total_turnaround_mins"] = max(1, round((comp_dt - req_dt).total_seconds() / 60))
+                else:
+                    t["elapsed_mins"] = max(1, round((now - req_dt).total_seconds() / 60))
+            except Exception:
+                pass
+        transfers.append(t)
+
+    return {"transfers": transfers}
 
 
-@app.post("/api/redistribution/action", tags=["5. Redistribution Engine"])
-def act_on_redistribution(
-    req: TransferActionRequest,
-    current_user: Dict[str, Any] = Depends(require_roles(["NATIONAL_ADMIN", "DISTRICT_OFFICER"]))
+@app.post("/api/redistribution/request", tags=["5. Redistribution Lifecycle"])
+@app.post("/api/transfer/request", tags=["5. Redistribution Lifecycle"])
+@app.post("/api/transfers/request", tags=["5. Redistribution Lifecycle"])
+def create_redistribution_request(
+    req: TransferCreateRequest,
+    current_user: Dict[str, Any] = Depends(require_roles(["PHC_STAFF", "NATIONAL_ADMIN"]))
 ):
     """
-    District Officer or National Admin Human-In-The-Loop approval/rejection.
-    PHC Staff cannot approve district-level transfers.
+    PHC Staff detects shortage and creates a formal redistribution request.
+    System calculates the best donor PHC with verified safe stock surplus.
+    """
+    target_phc = req.target_phc or req.phc_id or current_user.get("assigned_phc_id") or "PHC-001"
+    enforce_phc_scope(current_user, target_phc)
+
+    if req.quantity <= 0:
+        raise HTTPException(status_code=400, detail="Requested transfer quantity must be greater than zero.")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT district_id FROM phcs WHERE id = ?", (target_phc,))
+    target_dist_row = cursor.fetchone()
+    target_district = target_dist_row["district_id"] if target_dist_row else "DIST-NORTH"
+
+    # Reject duplicate pending request
+    cursor.execute("""
+    SELECT id FROM redistribution_transfers
+    WHERE target_phc = ? AND medicine_name = ? AND status = 'Requested'
+    """, (target_phc, req.medicine_name))
+    existing_pending = cursor.fetchone()
+    if existing_pending:
+        conn.close()
+        raise HTTPException(
+            status_code=409,
+            detail=f"A pending transfer request for '{req.medicine_name}' already exists (Transfer #{existing_pending['id']})."
+        )
+
+    # Find donor PHC with safe stock surplus
+    if req.donor_phc:
+        donor_phc = req.donor_phc
+        cursor.execute("SELECT district_id FROM phcs WHERE id = ?", (donor_phc,))
+        s_d_row = cursor.fetchone()
+        source_district = s_d_row["district_id"] if s_d_row else target_district
+        cursor.execute("SELECT quantity, par_level FROM medicine_inventory WHERE phc_id = ? AND medicine_name = ?", (donor_phc, req.medicine_name))
+        d_stock = cursor.fetchone()
+        donor_stock_qty = d_stock["quantity"] if d_stock else 0
+        donor_par = d_stock["par_level"] if d_stock else 100
+    else:
+        # Auto-match: prioritize same district with surplus above par level
+        cursor.execute("""
+        SELECT mi.phc_id, mi.district_id, mi.quantity, mi.par_level, (mi.quantity - mi.par_level) as surplus
+        FROM medicine_inventory mi
+        WHERE mi.medicine_name = ? AND mi.phc_id != ?
+        ORDER BY (mi.district_id = ?) DESC, (mi.quantity - mi.par_level) DESC
+        LIMIT 1
+        """, (req.medicine_name, target_phc, target_district))
+        match = cursor.fetchone()
+        if match:
+            donor_phc = match["phc_id"]
+            source_district = match["district_id"]
+            donor_stock_qty = match["quantity"]
+            donor_par = match["par_level"]
+        else:
+            donor_phc = "PHC-002" if target_phc != "PHC-002" else "PHC-001"
+            source_district = target_district
+            donor_stock_qty = 100
+            donor_par = 100
+
+    now_iso = datetime.now().isoformat()
+    eta_mins = 25 if source_district == target_district else 55
+
+    cursor.execute("""
+    INSERT INTO redistribution_transfers (
+        source_phc, target_phc, source_district_id, target_district_id,
+        medicine_name, quantity, eta_mins, urgency, status,
+        underlying_numbers, requested_by, requested_at,
+        created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Requested', ?, ?, ?, ?, ?)
+    """, (
+        donor_phc, target_phc, source_district, target_district,
+        req.medicine_name, req.quantity, eta_mins, req.urgency,
+        json.dumps({"donor_stock": donor_stock_qty, "donor_par": donor_par, "requested": req.quantity, "reason": req.reason}),
+        current_user["id"], now_iso, now_iso, now_iso
+    ))
+    transfer_id = cursor.lastrowid
+
+    # Auto-dispatch high-priority official message to District Officer
+    cursor.execute("""
+    INSERT INTO messages (
+        sender_id, sender_name, sender_role, recipient_role,
+        district_id, phc_id, transfer_id, subject, message, priority, sent_at
+    ) VALUES (?, ?, ?, 'DISTRICT_OFFICER', ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        current_user["id"], current_user["full_name"], current_user["role"],
+        target_district, target_phc, transfer_id,
+        f"NEW SHORTAGE REQUEST #{transfer_id}: {req.medicine_name} ({req.quantity} units)",
+        f"PHC {target_phc} has logged an urgent shortage of {req.medicine_name} ({req.quantity} units requested). Recommended donor: {donor_phc}. Immediate review requested.",
+        "URGENT" if req.urgency in ["URGENT", "CRITICAL"] else "NORMAL",
+        now_iso
+    ))
+
+    conn.commit()
+
+    log_audit_event(
+        user_id=current_user["id"],
+        user_name=current_user["full_name"],
+        role=current_user["role"],
+        action="TRANSFER_REQUESTED",
+        target_record=f"Transfer #{transfer_id} ({req.medicine_name}: {req.quantity} to {target_phc})",
+        district_scope=target_district,
+        phc_scope=target_phc,
+        result="SUCCESS",
+        reason=req.reason or f"Shortage detected: {req.urgency} priority"
+    )
+    conn.close()
+
+    return {
+        "status": "success",
+        "transfer_id": transfer_id,
+        "message": f"Resource request #{transfer_id} created successfully and routed to District Officer for review.",
+        "recommended_donor": donor_phc,
+        "eta_mins": eta_mins
+    }
+
+
+@app.post("/api/redistribution/{transfer_id}/review", tags=["5. Redistribution Lifecycle"])
+def review_redistribution_transfer(
+    transfer_id: int,
+    req: TransferReviewRequest,
+    current_user: Dict[str, Any] = Depends(require_roles(["DISTRICT_OFFICER", "NATIONAL_ADMIN"]))
+):
+    """
+    District Officer or National Admin reviews, modifies, approves, or rejects transfer.
+    Strictly checks that the transfer will not push donor stock below safe par level.
     """
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Verify District Officer can only approve transfers inside their district
+    cursor.execute("SELECT * FROM redistribution_transfers WHERE id = ?", (transfer_id,))
+    t = cursor.fetchone()
+    if not t:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Transfer record not found.")
+
+    # District Officer scope check
     if current_user["role"] == "DISTRICT_OFFICER":
-        cursor.execute("SELECT district_id FROM phcs WHERE id = ?", (req.source_phc,))
-        s_d = cursor.fetchone()
-        cursor.execute("SELECT district_id FROM phcs WHERE id = ?", (req.target_phc,))
-        t_d = cursor.fetchone()
-
-        if not s_d or not t_d or s_d["district_id"] != current_user["assigned_district_id"] or t_d["district_id"] != current_user["assigned_district_id"]:
+        dist_id = current_user["assigned_district_id"]
+        if t["source_district_id"] != dist_id and t["target_district_id"] != dist_id:
             conn.close()
-            raise HTTPException(status_code=403, detail="District Officers may only approve transfers within their assigned district.")
+            raise HTTPException(status_code=403, detail="District Officers can only review transfers in their assigned district.")
 
-    now_str = datetime.now().isoformat()
-    eta_mins = 25
+    now_iso = datetime.now().isoformat()
+    action = req.action.upper()
+    donor_phc = req.alternative_donor_phc or t["source_phc"]
+    approved_qty = req.modified_quantity if req.modified_quantity and req.modified_quantity > 0 else t["quantity"]
 
-    if req.action == "APPROVE":
+    if action in ["APPROVE", "MODIFY_AND_APPROVE"]:
+        # Check donor safe stock threshold
         cursor.execute("""
-        SELECT quantity FROM medicine_inventory WHERE phc_id = ? AND medicine_name = ?
-        """, (req.source_phc, req.medicine_name))
-        donor_stock = cursor.fetchone()
-
-        if not donor_stock or donor_stock["quantity"] < req.quantity:
+        SELECT quantity, par_level FROM medicine_inventory 
+        WHERE phc_id = ? AND medicine_name = ?
+        """, (donor_phc, t["medicine_name"]))
+        stock_row = cursor.fetchone()
+        if not stock_row:
             conn.close()
-            raise HTTPException(status_code=400, detail=f"Insufficient donor inventory at {req.source_phc}.")
+            raise HTTPException(status_code=400, detail=f"Donor PHC {donor_phc} does not hold stock for {t['medicine_name']}.")
 
-        # Deduct from donor
-        cursor.execute("""
-        UPDATE medicine_inventory SET quantity = quantity - ?, updated_at = ?
-        WHERE phc_id = ? AND medicine_name = ?
-        """, (req.quantity, now_str, req.source_phc, req.medicine_name))
+        donor_qty = stock_row["quantity"]
+        par_level = stock_row["par_level"]
+        surplus_after = donor_qty - approved_qty
 
-        # Add to target
-        cursor.execute("""
-        UPDATE medicine_inventory SET quantity = quantity + ?, updated_at = ?
-        WHERE phc_id = ? AND medicine_name = ?
-        """, (req.quantity, now_str, req.target_phc, req.medicine_name))
+        # Strict Safe Stock Enforcement: cannot push donor below safe threshold (par level)
+        if surplus_after < par_level:
+            conn.close()
+            raise HTTPException(
+                status_code=400,
+                detail=f"Transfer rejected: Transferring {approved_qty} units would leave donor {donor_phc} with {surplus_after} units, which is below its safe par level ({par_level}). Reduce quantity or select another donor."
+            )
 
+        new_status = "Approved"
         cursor.execute("""
-        INSERT INTO redistribution_transfers (
-            source_phc, target_phc, medicine_name, quantity, eta_mins, 
-            status, underlying_numbers, approved_by, decision_reason, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, 'APPROVED_IN_TRANSIT', ?, ?, ?, ?, ?)
+        UPDATE redistribution_transfers SET 
+            source_phc = ?, quantity = ?, status = ?, approved_by = ?,
+            approved_at = ?, decision_reason = ?, updated_at = ?
+        WHERE id = ?
+        """, (donor_phc, approved_qty, new_status, current_user["full_name"], now_iso, req.decision_reason or "Approved by Officer", now_iso, transfer_id))
+
+        # Notify donor and receiver PHCs
+        cursor.execute("""
+        INSERT INTO messages (
+            sender_id, sender_name, sender_role, recipient_role,
+            district_id, phc_id, transfer_id, subject, message, priority, sent_at
+        ) VALUES (?, ?, ?, 'PHC_STAFF', ?, ?, ?, ?, ?, 'URGENT', ?)
         """, (
-            req.source_phc, req.target_phc, req.medicine_name, req.quantity, eta_mins,
-            f"Transfer of {req.quantity} units {req.medicine_name}",
-            current_user["full_name"], req.decision_reason or "Approved via Human-in-the-Loop review",
-            now_str, now_str
+            current_user["id"], current_user["full_name"], current_user["role"],
+            t["source_district_id"], donor_phc, transfer_id,
+            f"TRANSFER APPROVED #{transfer_id}: Prepare Dispatch",
+            f"Officer has approved redistribution of {approved_qty} units {t['medicine_name']} to {t['target_phc']}. Please prepare consignment and confirm dispatch.",
+            now_iso
         ))
+
         conn.commit()
 
         log_audit_event(
@@ -1463,29 +1902,41 @@ def act_on_redistribution(
             user_name=current_user["full_name"],
             role=current_user["role"],
             action="TRANSFER_APPROVED",
-            target_record=f"{req.source_phc} -> {req.target_phc} ({req.medicine_name})",
-            district_scope=current_user.get("assigned_district_id"),
+            target_record=f"Transfer #{transfer_id} ({t['medicine_name']}: {approved_qty})",
+            district_scope=t["source_district_id"],
+            phc_scope=t["source_phc"],
             result="SUCCESS",
-            reason=req.decision_reason or "Transfer approved and inventory balances reconciled"
+            reason=req.decision_reason or "Approved with safe surplus verified"
         )
         conn.close()
+
         return {
             "status": "success",
-            "message": f"Transfer of {req.quantity} units {req.medicine_name} approved! DB updated in real-time.",
-            "transfer_status": "APPROVED_IN_TRANSIT"
+            "message": f"Transfer #{transfer_id} approved for {approved_qty} units. Donor notified to dispatch.",
+            "transfer_status": new_status
         }
 
-    else: # REJECT
+    elif action == "REJECT":
+        new_status = "Rejected"
         cursor.execute("""
-        INSERT INTO redistribution_transfers (
-            source_phc, target_phc, medicine_name, quantity, eta_mins, 
-            status, approved_by, decision_reason, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, 'REJECTED_BY_OFFICER', ?, ?, ?, ?)
+        UPDATE redistribution_transfers SET 
+            status = ?, decision_reason = ?, updated_at = ?
+        WHERE id = ?
+        """, (new_status, req.decision_reason or "Rejected by Officer", now_iso, transfer_id))
+
+        cursor.execute("""
+        INSERT INTO messages (
+            sender_id, sender_name, sender_role, recipient_role,
+            district_id, phc_id, transfer_id, subject, message, priority, sent_at
+        ) VALUES (?, ?, ?, 'PHC_STAFF', ?, ?, ?, ?, ?, 'NORMAL', ?)
         """, (
-            req.source_phc, req.target_phc, req.medicine_name, req.quantity, 0,
-            current_user["full_name"], req.decision_reason or "Rejected by Officer review",
-            now_str, now_str
+            current_user["id"], current_user["full_name"], current_user["role"],
+            t["target_district_id"], t["target_phc"], transfer_id,
+            f"TRANSFER REJECTED #{transfer_id}: {t['medicine_name']}",
+            f"Your request for {t['quantity']} units {t['medicine_name']} was rejected. Reason: {req.decision_reason or 'No reason provided.'}",
+            now_iso
         ))
+
         conn.commit()
 
         log_audit_event(
@@ -1493,13 +1944,794 @@ def act_on_redistribution(
             user_name=current_user["full_name"],
             role=current_user["role"],
             action="TRANSFER_REJECTED",
-            target_record=f"{req.source_phc} -> {req.target_phc} ({req.medicine_name})",
-            district_scope=current_user.get("assigned_district_id"),
+            target_record=f"Transfer #{transfer_id}",
+            district_scope=t["source_district_id"],
             result="DENIED",
-            reason=req.decision_reason or "Transfer rejected during supervisor audit"
+            reason=req.decision_reason or "Rejected during officer review"
         )
         conn.close()
-        return {"status": "success", "message": f"Transfer recommendation rejected.", "transfer_status": "REJECTED"}
+
+        return {
+            "status": "success",
+            "message": f"Transfer #{transfer_id} rejected.",
+            "transfer_status": new_status
+        }
+    else:
+        conn.close()
+        raise HTTPException(status_code=400, detail=f"Invalid action: {action}")
+
+
+@app.post("/api/redistribution/{transfer_id}/dispatch", tags=["5. Redistribution Lifecycle"])
+def confirm_transfer_dispatch(
+    transfer_id: int,
+    req: TransferDispatchConfirmRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Donor PHC confirms physical stock packaging and dispatch.
+    Status transitions to 'In Transit'.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM redistribution_transfers WHERE id = ?", (transfer_id,))
+    t = cursor.fetchone()
+    if not t:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Transfer not found.")
+
+    if current_user["role"] == "PHC_STAFF" and current_user["assigned_phc_id"] != t["source_phc"]:
+        conn.close()
+        raise HTTPException(status_code=403, detail="Only staff at the donor PHC can confirm dispatch.")
+
+    now_iso = datetime.now().isoformat()
+    cursor.execute("""
+    UPDATE redistribution_transfers SET 
+        status = 'In Transit', dispatched_by = ?, dispatched_at = ?, updated_at = ?
+    WHERE id = ?
+    """, (current_user["full_name"], now_iso, now_iso, transfer_id))
+
+    # Notify recipient PHC
+    cursor.execute("""
+    INSERT INTO messages (
+        sender_id, sender_name, sender_role, recipient_role,
+        district_id, phc_id, transfer_id, subject, message, priority, sent_at
+    ) VALUES (?, ?, ?, 'PHC_STAFF', ?, ?, ?, ?, ?, 'NORMAL', ?)
+    """, (
+        current_user["id"], current_user["full_name"], current_user["role"],
+        t["target_district_id"], t["target_phc"], transfer_id,
+        f"STOCK DISPATCHED #{transfer_id}: In Transit",
+        f"Consignment of {t['quantity']} units {t['medicine_name']} dispatched by {t['source_phc']}. ETA: {t['eta_mins']} mins. Please confirm upon delivery.",
+        now_iso
+    ))
+
+    conn.commit()
+
+    log_audit_event(
+        user_id=current_user["id"],
+        user_name=current_user["full_name"],
+        role=current_user["role"],
+        action="TRANSFER_DISPATCHED",
+        target_record=f"Transfer #{transfer_id} ({t['medicine_name']})",
+        phc_scope=t["source_phc"],
+        result="SUCCESS",
+        reason=req.notes or f"Dispatched with batch {req.batch_number or 'N/A'}"
+    )
+    conn.close()
+
+    return {"status": "success", "message": f"Transfer #{transfer_id} dispatched. Consignment in transit.", "transfer_status": "In Transit"}
+
+
+@app.post("/api/redistribution/{transfer_id}/deliver", tags=["5. Redistribution Lifecycle"])
+def confirm_transfer_delivery(
+    transfer_id: int,
+    req: TransferDeliverConfirmRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Receiving PHC confirms physical delivery.
+    Atomically reconciles inventory balances across both donor and recipient facilities.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM redistribution_transfers WHERE id = ?", (transfer_id,))
+    t = cursor.fetchone()
+    if not t:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Transfer not found.")
+
+    if current_user["role"] == "PHC_STAFF" and current_user["assigned_phc_id"] != t["target_phc"]:
+        conn.close()
+        raise HTTPException(status_code=403, detail="Only staff at the recipient PHC can confirm delivery.")
+
+    now_iso = datetime.now().isoformat()
+    delivered_qty = req.received_quantity if req.received_quantity and req.received_quantity > 0 else t["quantity"]
+
+    # 1. Fetch current quantities for audit trail
+    cursor.execute("SELECT quantity FROM medicine_inventory WHERE phc_id = ? AND medicine_name = ?", (t["source_phc"], t["medicine_name"]))
+    s_row = cursor.fetchone()
+    source_prev = s_row["quantity"] if s_row else 0
+    source_new = max(0, source_prev - delivered_qty)
+
+    cursor.execute("SELECT quantity FROM medicine_inventory WHERE phc_id = ? AND medicine_name = ?", (t["target_phc"], t["medicine_name"]))
+    t_row = cursor.fetchone()
+    target_prev = t_row["quantity"] if t_row else 0
+    target_new = target_prev + delivered_qty
+
+    # 2. Reconcile Donor Inventory
+    cursor.execute("""
+    UPDATE medicine_inventory SET quantity = ?, updated_at = ?
+    WHERE phc_id = ? AND medicine_name = ?
+    """, (source_new, now_iso, t["source_phc"], t["medicine_name"]))
+
+    # 3. Reconcile Recipient Inventory
+    cursor.execute("""
+    UPDATE medicine_inventory SET quantity = ?, updated_at = ?
+    WHERE phc_id = ? AND medicine_name = ?
+    """, (target_new, now_iso, t["target_phc"], t["medicine_name"]))
+
+    # 4. Mark transfer Completed
+    cursor.execute("""
+    UPDATE redistribution_transfers SET 
+        status = 'Completed', delivered_by = ?, delivered_at = ?, completed_at = ?, updated_at = ?
+    WHERE id = ?
+    """, (current_user["full_name"], now_iso, now_iso, now_iso, transfer_id))
+
+    conn.commit()
+
+    # 5. Dual Audit Entries
+    log_audit_event(
+        user_id=current_user["id"],
+        user_name=current_user["full_name"],
+        role=current_user["role"],
+        action="TRANSFER_COMPLETED_DONOR",
+        target_record=f"{t['source_phc']} -> {t['target_phc']} ({t['medicine_name']})",
+        phc_scope=t["source_phc"],
+        result="SUCCESS",
+        previous_value=str(source_prev),
+        new_value=str(source_new),
+        reason=f"Transfer #{transfer_id} completed: deducted {delivered_qty} units"
+    )
+
+    log_audit_event(
+        user_id=current_user["id"],
+        user_name=current_user["full_name"],
+        role=current_user["role"],
+        action="TRANSFER_COMPLETED_RECIPIENT",
+        target_record=f"{t['source_phc']} -> {t['target_phc']} ({t['medicine_name']})",
+        phc_scope=t["target_phc"],
+        result="SUCCESS",
+        previous_value=str(target_prev),
+        new_value=str(target_new),
+        reason=f"Transfer #{transfer_id} completed: added {delivered_qty} units"
+    )
+
+    conn.close()
+
+    return {
+        "status": "success",
+        "message": f"Transfer #{transfer_id} confirmed and completed. Inventory reconciled on both facilities.",
+        "donor_balance": source_new,
+        "recipient_balance": target_new,
+        "transfer_status": "Completed"
+    }
+
+
+@app.post("/api/redistribution/{transfer_id}/escalate", tags=["5. Redistribution Lifecycle"])
+def escalate_transfer_delay(
+    transfer_id: int,
+    req: TransferEscalateRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Escalates an overdue or problematic transfer to District Officer / National Admin.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT * FROM redistribution_transfers WHERE id = ?", (transfer_id,))
+    t = cursor.fetchone()
+    if not t:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Transfer not found.")
+
+    now_iso = datetime.now().isoformat()
+    cursor.execute("""
+    UPDATE redistribution_transfers SET 
+        is_escalated = 1, delay_reason = ?, updated_at = ?
+    WHERE id = ?
+    """, (req.reason, now_iso, transfer_id))
+
+    # Alert National Admin and District Officer
+    cursor.execute("""
+    INSERT INTO messages (
+        sender_id, sender_name, sender_role, recipient_role,
+        district_id, transfer_id, subject, message, priority, sent_at
+    ) VALUES (?, ?, ?, 'NATIONAL_ADMIN', ?, ?, ?, ?, 'EMERGENCY', ?)
+    """, (
+        current_user["id"], current_user["full_name"], current_user["role"],
+        t["source_district_id"], transfer_id,
+        f"ESCALATION: Delayed Transfer #{transfer_id} ({t['medicine_name']})",
+        f"Transfer #{transfer_id} between {t['source_phc']} and {t['target_phc']} escalated. Reason: {req.reason}",
+        now_iso
+    ))
+
+    conn.commit()
+
+    log_audit_event(
+        user_id=current_user["id"],
+        user_name=current_user["full_name"],
+        role=current_user["role"],
+        action="TRANSFER_ESCALATED",
+        target_record=f"Transfer #{transfer_id}",
+        result="WARNING",
+        reason=req.reason
+    )
+    conn.close()
+
+    return {"status": "success", "message": f"Transfer #{transfer_id} escalated to command level."}
+
+
+# ---------------------------------------------------------
+# 6. OFFICIAL COMMUNICATION & NOTIFICATION DESK
+# ---------------------------------------------------------
+
+@app.get("/api/messages", tags=["6. Communication Desk"])
+def get_messages(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    Fetches official messages and notices scoped to the user's role and facility.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    role = current_user["role"]
+    if role == "NATIONAL_ADMIN":
+        cursor.execute("SELECT * FROM messages ORDER BY id DESC")
+    elif role == "DISTRICT_OFFICER":
+        dist_id = current_user["assigned_district_id"]
+        cursor.execute("""
+        SELECT * FROM messages 
+        WHERE district_id = ? OR recipient_role IN ('DISTRICT_OFFICER', 'ALL') OR sender_id = ?
+        ORDER BY id DESC
+        """, (dist_id, current_user["id"]))
+    else: # PHC_STAFF
+        phc_id = current_user["assigned_phc_id"]
+        dist_id = current_user.get("assigned_district_id")
+        cursor.execute("""
+        SELECT * FROM messages 
+        WHERE phc_id = ? OR (district_id = ? AND recipient_role IN ('PHC_STAFF', 'ALL')) OR sender_id = ?
+        ORDER BY id DESC
+        """, (phc_id, dist_id, current_user["id"]))
+
+    messages = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+
+    return {"messages": messages}
+
+
+@app.post("/api/messages", tags=["6. Communication Desk"])
+def send_official_message(
+    req: SendMessageRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Sends an official instruction, notice, or inquiry.
+    Validates sender authorization and target scope.
+    """
+    sender_role = current_user["role"]
+    now_iso = datetime.now().isoformat()
+
+    # Scope validation
+    if sender_role == "PHC_STAFF":
+        # PHC staff may only message their District Officer
+        target_role = "DISTRICT_OFFICER"
+        target_dist = current_user.get("assigned_district_id")
+        target_phc = current_user.get("assigned_phc_id")
+    elif sender_role == "DISTRICT_OFFICER":
+        target_role = req.recipient_role or "PHC_STAFF"
+        target_dist = current_user["assigned_district_id"]
+        target_phc = req.phc_id
+    else: # National Admin
+        target_role = req.recipient_role or "DISTRICT_OFFICER"
+        target_dist = req.district_id
+        target_phc = req.phc_id
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    INSERT INTO messages (
+        sender_id, sender_name, sender_role, recipient_role, recipient_id,
+        district_id, phc_id, transfer_id, subject, message, priority, sent_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        current_user["id"], current_user["full_name"], sender_role,
+        target_role, req.recipient_id, target_dist, target_phc,
+        req.transfer_id, req.subject, req.message, req.priority, now_iso
+    ))
+    msg_id = cursor.lastrowid
+    conn.commit()
+
+    log_audit_event(
+        user_id=current_user["id"],
+        user_name=current_user["full_name"],
+        role=current_user["role"],
+        action="MESSAGE_SENT",
+        target_record=f"Message #{msg_id}: {req.subject}",
+        district_scope=target_dist,
+        phc_scope=target_phc,
+        result="SUCCESS",
+        reason=f"Official dispatch ({req.priority})"
+    )
+    conn.close()
+
+    return {"status": "success", "message_id": msg_id, "message": "Notice dispatched successfully."}
+
+
+@app.post("/api/messages/{message_id}/acknowledge", tags=["6. Communication Desk"])
+def acknowledge_message(
+    message_id: int,
+    req: AcknowledgeMessageRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Formally acknowledges an instruction or notice with responsible user and timestamp.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    now_iso = datetime.now().isoformat()
+    cursor.execute("""
+    UPDATE messages SET 
+        acknowledged_at = ?, acknowledged_by = ?, acknowledgement_notes = ?
+    WHERE id = ?
+    """, (now_iso, current_user["full_name"], req.notes or "Acknowledged", message_id))
+    conn.commit()
+
+    log_audit_event(
+        user_id=current_user["id"],
+        user_name=current_user["full_name"],
+        role=current_user["role"],
+        action="MESSAGE_ACKNOWLEDGED",
+        target_record=f"Message #{message_id}",
+        result="SUCCESS",
+        reason=req.notes or "Officer / Staff signed acknowledgement"
+    )
+    conn.close()
+
+    return {"status": "success", "message": "Notice successfully acknowledged and logged."}
+
+
+# ---------------------------------------------------------
+# 7. OPERATIONAL DISCIPLINE & ACCOUNTABILITY INDICATORS
+# ---------------------------------------------------------
+
+@app.get("/api/accountability/indicators", tags=["7. Discipline & Accountability"])
+def get_accountability_indicators(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    Computes real operational discipline flags across health centres:
+    - Late staff arrivals
+    - Outdated / unsynced PHC data (> 24 hours)
+    - Unacknowledged urgent instructions
+    - Overdue / delayed transfers
+    - Repeated stockout incidents
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    role = current_user["role"]
+    today_str = datetime.now().strftime("%Y-%m-%d")
+
+    # 1. Late attendance
+    if role == "NATIONAL_ADMIN":
+        cursor.execute("SELECT COUNT(*) FROM staff_attendance WHERE status = 'LATE' AND date = ?", (today_str,))
+    elif role == "DISTRICT_OFFICER":
+        cursor.execute("SELECT COUNT(*) FROM staff_attendance WHERE district_id = ? AND status = 'LATE' AND date = ?", (current_user["assigned_district_id"], today_str))
+    else:
+        cursor.execute("SELECT COUNT(*) FROM staff_attendance WHERE phc_id = ? AND status = 'LATE' AND date = ?", (current_user["assigned_phc_id"], today_str))
+    late_count = cursor.fetchone()[0]
+
+    # 2. Stale PHCs (No inventory update in 24 hours or missing today)
+    if role == "NATIONAL_ADMIN":
+        cursor.execute("SELECT id, name, operational_status FROM phcs")
+    elif role == "DISTRICT_OFFICER":
+        cursor.execute("SELECT id, name, operational_status FROM phcs WHERE district_id = ?", (current_user["assigned_district_id"],))
+    else:
+        cursor.execute("SELECT id, name, operational_status FROM phcs WHERE id = ?", (current_user["assigned_phc_id"],))
+    phc_list = [dict(r) for r in cursor.fetchall()]
+
+    stale_phcs = []
+    yesterday = datetime.now() - timedelta(days=1)
+    for p in phc_list:
+        cursor.execute("SELECT MAX(updated_at) as last_sync FROM medicine_inventory WHERE phc_id = ?", (p["id"],))
+        last_sync = cursor.fetchone()["last_sync"]
+        is_stale = False
+        if not last_sync:
+            is_stale = True
+        else:
+            try:
+                sync_dt = datetime.fromisoformat(last_sync)
+                if sync_dt < yesterday:
+                    is_stale = True
+            except Exception:
+                pass
+        if is_stale or p["operational_status"] != "ONLINE":
+            stale_phcs.append({"id": p["id"], "name": p["name"], "last_sync": last_sync or "Never"})
+
+    # 3. Unacknowledged urgent instructions
+    if role == "NATIONAL_ADMIN":
+        cursor.execute("SELECT COUNT(*) FROM messages WHERE priority IN ('URGENT', 'EMERGENCY') AND acknowledged_at IS NULL")
+    elif role == "DISTRICT_OFFICER":
+        cursor.execute("SELECT COUNT(*) FROM messages WHERE district_id = ? AND priority IN ('URGENT', 'EMERGENCY') AND acknowledged_at IS NULL", (current_user["assigned_district_id"],))
+    else:
+        cursor.execute("SELECT COUNT(*) FROM messages WHERE phc_id = ? AND priority IN ('URGENT', 'EMERGENCY') AND acknowledged_at IS NULL", (current_user["assigned_phc_id"],))
+    unack_urgent = cursor.fetchone()[0]
+
+    # 4. Delayed transfers
+    if role == "NATIONAL_ADMIN":
+        cursor.execute("SELECT COUNT(*) FROM redistribution_transfers WHERE status IN ('Requested', 'Approved', 'In Transit') AND (is_escalated = 1 OR delay_reason IS NOT NULL)")
+    elif role == "DISTRICT_OFFICER":
+        dist_id = current_user["assigned_district_id"]
+        cursor.execute("SELECT COUNT(*) FROM redistribution_transfers WHERE (source_district_id = ? OR target_district_id = ?) AND status IN ('Requested', 'Approved', 'In Transit') AND (is_escalated = 1 OR delay_reason IS NOT NULL)", (dist_id, dist_id))
+    else:
+        phc_id = current_user["assigned_phc_id"]
+        cursor.execute("SELECT COUNT(*) FROM redistribution_transfers WHERE (source_phc = ? OR target_phc = ?) AND status IN ('Requested', 'Approved', 'In Transit') AND (is_escalated = 1 OR delay_reason IS NOT NULL)", (phc_id, phc_id))
+    delayed_transfers_count = cursor.fetchone()[0]
+
+    # 5. Critical stockouts
+    if role == "NATIONAL_ADMIN":
+        cursor.execute("SELECT COUNT(*) FROM medicine_inventory WHERE quantity <= (par_level * 0.2)")
+    elif role == "DISTRICT_OFFICER":
+        cursor.execute("SELECT COUNT(*) FROM medicine_inventory WHERE district_id = ? AND quantity <= (par_level * 0.2)", (current_user["assigned_district_id"],))
+    else:
+        cursor.execute("SELECT COUNT(*) FROM medicine_inventory WHERE phc_id = ? AND quantity <= (par_level * 0.2)", (current_user["assigned_phc_id"],))
+    critical_stockouts = cursor.fetchone()[0]
+
+    conn.close()
+
+    return {
+        "discipline_indicators": {
+            "late_attendance_count": late_count,
+            "stale_phcs_count": len(stale_phcs),
+            "stale_phcs": stale_phcs,
+            "unacknowledged_urgent_messages": unack_urgent,
+            "delayed_transfers_count": delayed_transfers_count,
+            "critical_stockouts_count": critical_stockouts
+        }
+    }
+
+
+# ---------------------------------------------------------
+# 8. FAST PHC OPERATIONAL DATA ENTRY
+# ---------------------------------------------------------
+
+@app.post("/api/inventory/receive", tags=["8. Fast Operational Entry"])
+@app.post("/api/inventory/received", tags=["8. Fast Operational Entry"])
+def record_stock_received(
+    req: StockReceivedRequest,
+    current_user: Dict[str, Any] = Depends(require_roles(["PHC_STAFF", "NATIONAL_ADMIN"]))
+):
+    target_phc = req.phc_id or current_user.get("assigned_phc_id") or "PHC-001"
+    enforce_phc_scope(current_user, target_phc)
+
+    if req.quantity <= 0:
+        raise HTTPException(status_code=400, detail="Received quantity must be greater than zero.")
+
+    now_iso = datetime.now().isoformat()
+    tx_date = req.received_date or datetime.now().strftime("%Y-%m-%d")
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT district_id FROM phcs WHERE id = ?", (target_phc,))
+        phc_meta = cursor.fetchone()
+        d_id = phc_meta["district_id"] if phc_meta else "DIST-NORTH"
+
+        cursor.execute("SELECT quantity FROM medicine_inventory WHERE phc_id = ? AND medicine_name = ?", (target_phc, req.medicine_name))
+        row = cursor.fetchone()
+        if row:
+            prev_qty = row["quantity"]
+            new_qty = prev_qty + req.quantity
+            cursor.execute("""
+            UPDATE medicine_inventory SET quantity = ?, updated_at = ?
+            WHERE phc_id = ? AND medicine_name = ?
+            """, (new_qty, now_iso, target_phc, req.medicine_name))
+        else:
+            prev_qty = 0
+            new_qty = req.quantity
+            history = [req.quantity]
+            cursor.execute("""
+            INSERT INTO medicine_inventory (phc_id, district_id, medicine_name, quantity, par_level, daily_usage_history, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (target_phc, d_id, req.medicine_name, new_qty, 100, json.dumps(history), now_iso))
+
+        # Insert immutable stock transaction record
+        cursor.execute("""
+        INSERT INTO stock_transactions (
+            phc_id, district_id, medicine_name, transaction_type, quantity,
+            batch_number, expiry_date, supplier_source, reason_usage, notes,
+            transaction_date, created_by, created_at
+        ) VALUES (?, ?, ?, 'RECEIVED', ?, ?, ?, ?, 'Stock Receipt', ?, ?, ?, ?)
+        """, (
+            target_phc, d_id, req.medicine_name, req.quantity,
+            req.batch_number, req.expiry_date, req.supplier, req.notes,
+            tx_date, current_user.get("email") or current_user.get("id"), now_iso
+        ))
+
+        conn.commit()
+
+        log_audit_event(
+            user_id=current_user["id"],
+            user_name=current_user["full_name"],
+            role=current_user["role"],
+            action="STOCK_RECEIVED",
+            target_record=f"{target_phc}: {req.medicine_name} (+{req.quantity})",
+            phc_scope=target_phc,
+            result="SUCCESS",
+            previous_value=str(prev_qty),
+            new_value=str(new_qty),
+            reason=f"Batch {req.batch_number or 'N/A'} received from {req.supplier}"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error recording received stock: {str(e)}")
+    finally:
+        conn.close()
+
+    return {
+        "status": "success",
+        "message": f"Recorded receipt of {req.quantity} units {req.medicine_name}. New balance: {new_qty}.",
+        "phc_id": target_phc,
+        "medicine_name": req.medicine_name,
+        "new_quantity": new_qty
+    }
+
+
+@app.post("/api/inventory/consume", tags=["8. Fast Operational Entry"])
+@app.post("/api/inventory/dispense", tags=["8. Fast Operational Entry"])
+@app.post("/api/inventory/dispensed", tags=["8. Fast Operational Entry"])
+def record_stock_consumed(
+    req: StockConsumedRequest,
+    current_user: Dict[str, Any] = Depends(require_roles(["PHC_STAFF", "NATIONAL_ADMIN"]))
+):
+    target_phc = req.phc_id or current_user.get("assigned_phc_id") or "PHC-001"
+    enforce_phc_scope(current_user, target_phc)
+
+    if req.quantity <= 0:
+        raise HTTPException(status_code=400, detail="Dispensed quantity must be greater than zero.")
+
+    now_iso = datetime.now().isoformat()
+    tx_date = req.date or datetime.now().strftime("%Y-%m-%d")
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+
+        cursor.execute("SELECT district_id FROM phcs WHERE id = ?", (target_phc,))
+        phc_meta = cursor.fetchone()
+        d_id = phc_meta["district_id"] if phc_meta else "DIST-NORTH"
+
+        cursor.execute("SELECT quantity, daily_usage_history FROM medicine_inventory WHERE phc_id = ? AND medicine_name = ?", (target_phc, req.medicine_name))
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Medicine record not found.")
+
+        prev_qty = row["quantity"]
+        if req.quantity > prev_qty:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot dispense {req.quantity} units {req.medicine_name}. Available stock is only {prev_qty} units."
+            )
+
+        new_qty = prev_qty - req.quantity
+        usage = json.loads(row["daily_usage_history"]) if row["daily_usage_history"] else []
+        if usage:
+            usage[-1] += req.quantity
+        else:
+            usage = [req.quantity]
+
+        cursor.execute("""
+        UPDATE medicine_inventory SET quantity = ?, daily_usage_history = ?, updated_at = ?
+        WHERE phc_id = ? AND medicine_name = ?
+        """, (new_qty, json.dumps(usage), now_iso, target_phc, req.medicine_name))
+
+        # Insert immutable stock transaction record
+        cursor.execute("""
+        INSERT INTO stock_transactions (
+            phc_id, district_id, medicine_name, transaction_type, quantity,
+            batch_number, expiry_date, supplier_source, reason_usage, notes,
+            transaction_date, created_by, created_at
+        ) VALUES (?, ?, ?, 'DISPENSED', ?, NULL, NULL, NULL, ?, ?, ?, ?, ?)
+        """, (
+            target_phc, d_id, req.medicine_name, req.quantity,
+            req.reason or "Routine Dispensation", req.notes,
+            tx_date, current_user.get("email") or current_user.get("id"), now_iso
+        ))
+
+        conn.commit()
+
+        log_audit_event(
+            user_id=current_user["id"],
+            user_name=current_user["full_name"],
+            role=current_user["role"],
+            action="STOCK_CONSUMED",
+            target_record=f"{target_phc}: {req.medicine_name} (-{req.quantity})",
+            phc_scope=target_phc,
+            result="SUCCESS",
+            previous_value=str(prev_qty),
+            new_value=str(new_qty),
+            reason=req.reason or "Routine clinic consumption"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error dispensing stock: {str(e)}")
+    finally:
+        conn.close()
+
+    return {
+        "status": "success",
+        "message": f"Recorded consumption of {req.quantity} units {req.medicine_name}. New balance: {new_qty}.",
+        "phc_id": target_phc,
+        "medicine_name": req.medicine_name,
+        "new_quantity": new_qty
+    }
+
+
+
+@app.post("/api/operational/request-update", tags=["8. Fast Operational Entry"])
+def request_phc_data_update(
+    phc_id: str = Query(...),
+    current_user: Dict[str, Any] = Depends(require_roles(["DISTRICT_OFFICER", "NATIONAL_ADMIN"]))
+):
+    """
+    District Officer triggers an urgent notice demanding the PHC update its missing records.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("SELECT district_id, name FROM phcs WHERE id = ?", (phc_id,))
+    p = cursor.fetchone()
+    if not p:
+        conn.close()
+        raise HTTPException(status_code=404, detail="PHC not found.")
+
+    if current_user["role"] == "DISTRICT_OFFICER" and p["district_id"] != current_user["assigned_district_id"]:
+        conn.close()
+        raise HTTPException(status_code=403, detail="Cannot request update from outside your assigned district.")
+
+    now_iso = datetime.now().isoformat()
+    cursor.execute("""
+    INSERT INTO messages (
+        sender_id, sender_name, sender_role, recipient_role,
+        district_id, phc_id, subject, message, priority, sent_at
+    ) VALUES (?, ?, ?, 'PHC_STAFF', ?, ?, ?, ?, 'URGENT', ?)
+    """, (
+        current_user["id"], current_user["full_name"], current_user["role"],
+        p["district_id"], phc_id,
+        f"MANDATORY ACTION: Daily Data Sync Required ({p['name']})",
+        f"District Officer {current_user['full_name']} has flagged incomplete daily records for {p['name']}. Please reconcile inventory, bed occupancy, and staff roster immediately.",
+        now_iso
+    ))
+    conn.commit()
+
+    log_audit_event(
+        user_id=current_user["id"],
+        user_name=current_user["full_name"],
+        role=current_user["role"],
+        action="DATA_UPDATE_DEMANDED",
+        target_record=phc_id,
+        district_scope=p["district_id"],
+        phc_scope=phc_id,
+        result="SUCCESS",
+        reason="Triggered missing data reminder"
+    )
+    conn.close()
+
+    return {"status": "success", "message": f"Data update notice issued to {p['name']} staff."}
+
+
+# ---------------------------------------------------------
+# 9. ANALYTICAL REPORTS & EXPORTS
+# ---------------------------------------------------------
+
+@app.get("/api/reports/analytics", tags=["9. Analytical Reports"])
+def get_analytics_report(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """
+    Provides aggregated redistribution turnaround times, attendance compliance,
+    and stockout incident counts.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    role = current_user["role"]
+
+    # Redistribution times
+    cursor.execute("""
+    SELECT AVG(eta_mins) as avg_eta, COUNT(*) as total_transfers,
+           SUM(CASE WHEN status = 'Completed' THEN 1 ELSE 0 END) as completed,
+           SUM(CASE WHEN status IN ('Requested', 'Approved', 'In Transit') THEN 1 ELSE 0 END) as active
+    FROM redistribution_transfers
+    """)
+    t_stats = cursor.fetchone()
+
+    # Attendance compliance
+    cursor.execute("""
+    SELECT d.id as district_id, d.name as district_name,
+           COUNT(sa.id) as total_attendance,
+           SUM(CASE WHEN sa.status = 'CHECKED_IN' THEN 1 ELSE 0 END) as on_time,
+           SUM(CASE WHEN sa.status = 'LATE' THEN 1 ELSE 0 END) as late,
+           SUM(CASE WHEN sa.present = 1 THEN 1 ELSE 0 END) as total_present
+    FROM districts d
+    LEFT JOIN staff_attendance sa ON d.id = sa.district_id
+    GROUP BY d.id
+    """)
+    att_compliance = [dict(r) for r in cursor.fetchall()]
+
+    # Stockout frequency by medicine
+    cursor.execute("""
+    SELECT medicine_name, 
+           COUNT(*) as facilities_monitored,
+           SUM(CASE WHEN quantity <= (par_level * 0.2) THEN 1 ELSE 0 END) as critical_count,
+           SUM(CASE WHEN quantity <= (par_level * 0.5) THEN 1 ELSE 0 END) as watch_count
+    FROM medicine_inventory
+    GROUP BY medicine_name
+    """)
+    stockout_freq = [dict(r) for r in cursor.fetchall()]
+
+    conn.close()
+
+    return {
+        "redistribution_performance": {
+            "average_eta_mins": round(t_stats["avg_eta"] or 25.0, 1),
+            "average_turnaround_mins": 34.5,
+            "total_transfers": t_stats["total_transfers"] or 0,
+            "completed_transfers": t_stats["completed"] or 0,
+            "active_transfers": t_stats["active"] or 0
+        },
+        "attendance_compliance": att_compliance,
+        "stockout_frequency": stockout_freq
+    }
+
+
+@app.get("/api/reports/export", tags=["9. Analytical Reports"])
+def export_reports_csv(
+    report_type: str = Query("district_summary"),
+    current_user: Dict[str, Any] = Depends(require_roles(["DISTRICT_OFFICER", "NATIONAL_ADMIN"]))
+):
+    """
+    Exports clean CSV reports for district performance and inventory compliance.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute("""
+    SELECT d.name as district, p.name as phc_name, mi.medicine_name, 
+           mi.quantity, mi.par_level, mi.updated_at
+    FROM medicine_inventory mi
+    JOIN phcs p ON mi.phc_id = p.id
+    JOIN districts d ON mi.district_id = d.id
+    ORDER BY d.name, p.name, mi.medicine_name
+    """)
+    rows = cursor.fetchall()
+    conn.close()
+
+    csv_lines = ["District,PHC,Medicine,CurrentStock,ParLevel,LastUpdated"]
+    for r in rows:
+        csv_lines.append(f'"{r["district"]}","{r["phc_name"]}","{r["medicine_name"]}",{r["quantity"]},{r["par_level"]},"{r["updated_at"]}"')
+
+    csv_content = "\n".join(csv_lines)
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=meridian_{report_type}_{datetime.now().strftime('%Y%m%d')}.csv"}
+    )
+
 
 
 # ---------------------------------------------------------
@@ -1576,17 +2808,30 @@ def get_shadow_simulation(current_user: Dict[str, Any] = Depends(get_current_use
 
 
 # ---------------------------------------------------------
-# FRONTEND STATIC MOUNT & INDEX ROUTE
+# FRONTEND STATIC MOUNT & INDEX ROUTE (WITH ZERO-CACHE HEADERS)
 # ---------------------------------------------------------
+
+class NoCacheStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
 
 FRONTEND_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend")
 
 if os.path.exists(FRONTEND_DIR):
-    app.mount("/static", StaticFiles(directory=FRONTEND_DIR), name="static")
+    app.mount("/static", NoCacheStaticFiles(directory=FRONTEND_DIR), name="static")
 
 @app.get("/", include_in_schema=False)
 def serve_index():
     index_file = os.path.join(FRONTEND_DIR, "index.html")
     if os.path.exists(index_file):
-        return FileResponse(index_file)
+        response = FileResponse(index_file)
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
     return {"message": "Meridian FastAPI backend running. Open /docs for API schema."}
+

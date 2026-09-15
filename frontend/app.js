@@ -1,24 +1,265 @@
-// Meridian Frontend Application Logic - Version 2.0 (Enterprise RBAC)
+// ==========================================================================
+// MERIDIAN — Healthcare Command & Resource Management Platform (v2.1)
+// Unified 4-Section Architecture: Dashboard, Operations, Alerts & Transfers, Communication & Reports
+// ==========================================================================
+
 window.currentUser = null;
+let currentMainTab = "dashboard";
+let currentOpsSubTab = "inventory";
+let currentCommSubTab = "messages";
 let activePhcId = "PHC-001";
 let activeDistrictId = "DIST-NORTH";
-let footfallChartInstance = null;
-let forecastChartInstance = null;
-let speechRecognitionInstance = null;
-let pendingOverrideAction = null;
 
-// Attendance module state
-let currentAttendanceRosterData = [];
-let currentStaffMembers = [];
-let lastPunchTimes = {}; // Card UID -> timestamp (ms) for debounce/duplicate prevention
+let footfallChartInstance = null;
+let selectedReviewTransfer = null;
+let pendingOverridePayload = null;
+
+// Operational Data Caches
+let cachedInventory = [];
+let cachedEquipment = [];
+let cachedStaffAttendance = [];
+let cachedFootfall = [];
+let cachedBedStatus = null;
+
+// ==========================================================================
+// SHARED FRONTEND MUTATION SYSTEM & NOTIFICATIONS
+// ==========================================================================
+
+// Accessible Toast Notification System
+function showToast(message, type = "info", title = null, duration = 4000) {
+    const container = document.getElementById("toast-container");
+    if (!container) {
+        console.log(`[Toast ${type}] ${title ? title + ': ' : ''}${message}`);
+        return;
+    }
+
+    const toast = document.createElement("div");
+    toast.className = `meridian-toast ${type}`;
+    toast.setAttribute("role", type === "error" ? "alert" : "status");
+    toast.setAttribute("aria-live", type === "error" ? "assertive" : "polite");
+
+    const icons = {
+        success: "✅",
+        error: "❌",
+        warning: "⚠️",
+        info: "ℹ️"
+    };
+    const defaultTitles = {
+        success: "Success",
+        error: "Action Failed",
+        warning: "Warning",
+        info: "Notification"
+    };
+
+    const toastIcon = icons[type] || "ℹ️";
+    const toastTitle = title || defaultTitles[type] || "Notification";
+
+    toast.innerHTML = `
+        <div class="toast-icon">${toastIcon}</div>
+        <div class="toast-content">
+            <div class="toast-title">${toastTitle}</div>
+            <div class="toast-msg">${message}</div>
+        </div>
+        <button type="button" class="toast-close-btn" aria-label="Dismiss notification">×</button>
+    `;
+
+    const closeBtn = toast.querySelector(".toast-close-btn");
+    let dismissTimer = null;
+
+    const dismissToast = () => {
+        if (dismissTimer) clearTimeout(dismissTimer);
+        toast.classList.add("toast-hide");
+        setTimeout(() => {
+            if (toast.parentNode) toast.parentNode.removeChild(toast);
+        }, 250);
+    };
+
+    if (closeBtn) closeBtn.addEventListener("click", dismissToast);
+
+    container.appendChild(toast);
+
+    if (duration > 0) {
+        dismissTimer = setTimeout(dismissToast, duration);
+    }
+    return toast;
+}
+
+// Button Loading State Helper
+function setButtonLoading(btnOrId, isLoading, loadingText = null) {
+    const btn = typeof btnOrId === "string" ? document.getElementById(btnOrId) : btnOrId;
+    if (!btn) return;
+
+    if (isLoading) {
+        if (!btn.dataset.originalHtml) {
+            btn.dataset.originalHtml = btn.innerHTML;
+        }
+        btn.disabled = true;
+        btn.classList.add("is-loading");
+        if (loadingText) {
+            btn.dataset.loadingText = loadingText;
+        }
+    } else {
+        btn.disabled = false;
+        btn.classList.remove("is-loading");
+        if (btn.dataset.originalHtml) {
+            btn.innerHTML = btn.dataset.originalHtml;
+            delete btn.dataset.originalHtml;
+        }
+        if (btn.dataset.loadingText) {
+            delete btn.dataset.loadingText;
+        }
+    }
+}
+
+// Unified API Fetch Helper
+async function apiFetch(url, options = {}) {
+    const defaultHeaders = {
+        "Accept": "application/json"
+    };
+    if (options.body && typeof options.body === "string") {
+        defaultHeaders["Content-Type"] = "application/json";
+    }
+
+    const config = {
+        ...options,
+        headers: {
+            ...defaultHeaders,
+            ...(options.headers || {})
+        },
+        credentials: "same-origin"
+    };
+
+    try {
+        const res = await fetch(url, config);
+        let data = null;
+        const contentType = res.headers.get("content-type");
+        if (contentType && contentType.includes("application/json")) {
+            try {
+                data = await res.json();
+            } catch (e) {
+                data = null;
+            }
+        } else {
+            try {
+                data = await res.text();
+            } catch (e) {
+                data = null;
+            }
+        }
+
+        if (res.status === 401) {
+            // Check if genuine auth expiry (not login endpoint)
+            if (!url.includes("/api/auth/login") && window.currentUser) {
+                showToast("Your session has expired. Please sign in again.", "error", "Session Expired");
+                showLoginScreen();
+            }
+            return {
+                ok: false,
+                status: 401,
+                data,
+                detail: (data && data.detail) || "Authentication required."
+            };
+        }
+
+        if (!res.ok) {
+            let detail = "An error occurred.";
+            if (data && typeof data === "object") {
+                detail = data.detail || data.message || JSON.stringify(data);
+            } else if (typeof data === "string" && data.trim()) {
+                detail = data;
+            }
+            return {
+                ok: false,
+                status: res.status,
+                data,
+                detail: detail
+            };
+        }
+
+        return {
+            ok: true,
+            status: res.status,
+            data
+        };
+    } catch (err) {
+        console.error("API Request Error:", err);
+        return {
+            ok: false,
+            status: 0,
+            data: null,
+            detail: "Network connection error. Server unreachable."
+        };
+    }
+}
+
+// General Modal Open / Close Helpers with Focus Trapping & Accessibility
+function openModal(modalId, triggerEl = null) {
+    const modal = typeof modalId === "string" ? document.getElementById(modalId) : modalId;
+    if (!modal) return;
+    if (triggerEl && triggerEl.id) {
+        modal.dataset.triggerId = triggerEl.id;
+    }
+    modal.classList.add("active");
+    modal.classList.add("open");
+    
+    // Auto focus first interactive element
+    const focusable = modal.querySelector("input:not([type='hidden']):not([readonly]), select, textarea, button:not(.meridian-modal-close)");
+    if (focusable) {
+        setTimeout(() => focusable.focus(), 60);
+    }
+}
+
+function closeModal(modalId) {
+    const modal = typeof modalId === "string" ? document.getElementById(modalId) : modalId;
+    if (!modal) return;
+    modal.classList.remove("active");
+    modal.classList.remove("open");
+    
+    // Return focus to trigger button
+    if (modal.dataset.triggerId) {
+        const triggerEl = document.getElementById(modal.dataset.triggerId);
+        if (triggerEl) triggerEl.focus();
+        delete modal.dataset.triggerId;
+    }
+}
 
 document.addEventListener("DOMContentLoaded", () => {
+    checkDemoModeConfig();
     checkAuthSession();
 });
 
-// -------------------------------------------------------------
+// Guard against BFCache restoring protected dashboard after logout
+window.addEventListener("pageshow", (event) => {
+    if (event.persisted || !window.currentUser) {
+        checkAuthSession();
+    }
+});
+
+// Guard browser Back/Forward navigation
+window.addEventListener("popstate", () => {
+    if (!window.currentUser) {
+        showLoginScreen();
+    }
+});
+
+async function checkDemoModeConfig() {
+    try {
+        const res = await fetch("/api/config/demo-mode");
+        if (res.ok) {
+            const data = await res.json();
+            const isDemo = data.demo_mode !== false;
+            const demoBox = document.getElementById("demo-access-box");
+            const switchDemoBtn = document.getElementById("menu-switch-demo-btn");
+            if (demoBox) demoBox.style.display = isDemo ? "block" : "none";
+            if (switchDemoBtn) switchDemoBtn.style.display = isDemo ? "flex" : "none";
+        }
+    } catch (e) {}
+}
+
+// --------------------------------------------------------------------------
 // 0. AUTHENTICATION & SESSION MANAGEMENT
-// -------------------------------------------------------------
+// --------------------------------------------------------------------------
+
 async function checkAuthSession() {
     try {
         const res = await fetch("/api/auth/me");
@@ -29,16 +270,17 @@ async function checkAuthSession() {
             showLoginScreen();
         }
     } catch (err) {
+        console.error("Auth check failed:", err);
         showLoginScreen();
     }
 }
 
 function showLoginScreen() {
     window.currentUser = null;
-    const loginOverlay = document.getElementById("login-overlay");
-    const appLayout = document.getElementById("app-layout");
-    if (loginOverlay) loginOverlay.style.display = "flex";
-    if (appLayout) appLayout.style.display = "none";
+    const overlay = document.getElementById("login-overlay");
+    const app = document.getElementById("app-layout");
+    if (overlay) overlay.style.display = "flex";
+    if (app) app.style.display = "none";
 }
 
 function quickFillCredentials(username, password) {
@@ -46,35 +288,32 @@ function quickFillCredentials(username, password) {
     const pInput = document.getElementById("login-password");
     if (uInput) uInput.value = username;
     if (pInput) pInput.value = password;
-    
-    // Auto-trigger submit for slick demo evaluation
-    const fakeEvent = { preventDefault: () => {} };
-    handleLoginSubmit(fakeEvent);
+    handleLoginSubmit(new Event("submit"));
 }
 
 function toggleLoginPasswordVisibility() {
     const pwd = document.getElementById("login-password");
-    if (pwd) {
-        pwd.type = pwd.type === "password" ? "text" : "password";
-    }
+    if (pwd) pwd.type = pwd.type === "password" ? "text" : "password";
 }
 
 async function handleLoginSubmit(e) {
     if (e && e.preventDefault) e.preventDefault();
-    const username = document.getElementById("login-username").value;
-    const password = document.getElementById("login-password").value;
-    const rememberMe = document.getElementById("login-remember-me") ? document.getElementById("login-remember-me").checked : false;
-    
+    const uInput = document.getElementById("login-username");
+    const pInput = document.getElementById("login-password");
+    const rInput = document.getElementById("login-remember-me");
+    if (!uInput || !pInput) return;
+
+    const username = uInput.value.trim();
+    const password = pInput.value;
+    const rememberMe = rInput ? rInput.checked : false;
+
     const alertBox = document.getElementById("login-alert");
     const alertText = document.getElementById("login-alert-text");
     const btn = document.getElementById("login-submit-btn");
     const spinner = document.getElementById("login-btn-spinner");
     const btnText = document.getElementById("login-btn-text");
 
-    if (alertBox) {
-        alertBox.className = "login-alert";
-        alertBox.style.display = "none";
-    }
+    if (alertBox) alertBox.style.display = "none";
     if (btn) btn.disabled = true;
     if (spinner) spinner.style.display = "inline";
     if (btnText) btnText.innerText = "Authenticating...";
@@ -90,16 +329,7 @@ async function handleLoginSubmit(e) {
         if (!res.ok) {
             if (alertBox) {
                 alertBox.style.display = "flex";
-                if (res.status === 403) {
-                    alertBox.classList.add("disabled");
-                    alertText.innerText = data.detail || "This account has been disabled.";
-                } else if (res.status === 429) {
-                    alertBox.classList.add("error");
-                    alertText.innerText = data.detail || "Too many failed attempts. Rate limited.";
-                } else {
-                    alertBox.classList.add("error");
-                    alertText.innerText = data.detail || "Invalid credentials.";
-                }
+                alertText.innerText = data.detail || "Authentication failed. Check credentials.";
             }
             return;
         }
@@ -108,8 +338,7 @@ async function handleLoginSubmit(e) {
     } catch (err) {
         if (alertBox) {
             alertBox.style.display = "flex";
-            alertBox.classList.add("error");
-            alertText.innerText = "Network connection failed. Verify backend server is running.";
+            alertText.innerText = "Network connection error. Server unreachable.";
         }
     } finally {
         if (btn) btn.disabled = false;
@@ -118,453 +347,1205 @@ async function handleLoginSubmit(e) {
     }
 }
 
+function initAuthenticatedSession(user) {
+    window.currentUser = user;
+    
+    // Hide login overlay, reveal app layout
+    const overlay = document.getElementById("login-overlay");
+    const app = document.getElementById("app-layout");
+    if (overlay) overlay.style.display = "none";
+    if (app) app.style.display = "flex";
+
+    // Set user avatar & navbar details
+    const avatar = document.getElementById("nav-user-avatar");
+    const nameSpan = document.getElementById("nav-user-name");
+    const roleBadge = document.getElementById("nav-user-role");
+    const scopeChip = document.getElementById("nav-user-scope");
+    const dropdownName = document.getElementById("dropdown-full-name");
+    const dropdownEmail = document.getElementById("dropdown-email");
+    const adminActions = document.getElementById("dropdown-admin-actions");
+
+    if (avatar) avatar.innerText = user.full_name ? user.full_name.split(" ").map(n=>n[0]).join("").slice(0, 2) : "ME";
+    if (nameSpan) nameSpan.innerText = user.full_name || user.id;
+    if (roleBadge) {
+        roleBadge.innerText = user.role.replace("_", " ");
+        roleBadge.className = "user-role-badge " + (user.role === "NATIONAL_ADMIN" ? "admin" : (user.role === "DISTRICT_OFFICER" ? "officer" : "staff"));
+    }
+    if (dropdownName) dropdownName.innerText = user.full_name;
+    if (dropdownEmail) dropdownEmail.innerText = user.email;
+
+    // Demo Mode controls
+    const isDemo = user.demo_mode !== false;
+    const switchDemoBtn = document.getElementById("menu-switch-demo-btn");
+    const demoBox = document.getElementById("demo-access-box");
+    if (switchDemoBtn) switchDemoBtn.style.display = isDemo ? "flex" : "none";
+    if (demoBox) demoBox.style.display = isDemo ? "block" : "none";
+
+    // Sidebar Scope Card
+    const scopeName = document.getElementById("sidebar-scope-name");
+    const scopeSub = document.getElementById("sidebar-scope-sub");
+    const roleVer = document.getElementById("sidebar-role-ver");
+
+    if (user.role === "NATIONAL_ADMIN") {
+        if (scopeChip) scopeChip.innerText = "Nationwide";
+        if (scopeName) scopeName.innerText = "National Command";
+        if (scopeSub) scopeSub.innerText = "All Districts & Health Nodes";
+        if (roleVer) roleVer.innerText = "NAT-COMMAND";
+        if (adminActions) adminActions.style.display = "block";
+        activePhcId = "PHC-001";
+        setupTopFacilitySelector(["PHC-001", "PHC-002", "PHC-003", "PHC-004"]);
+    } else if (user.role === "DISTRICT_OFFICER") {
+        const dId = user.assigned_district_id || "DIST-NORTH";
+        activeDistrictId = dId;
+        const dName = dId === "DIST-NORTH" ? "District North" : "District South";
+        if (scopeChip) scopeChip.innerText = dId;
+        if (scopeName) scopeName.innerText = dName;
+        if (scopeSub) scopeSub.innerText = "District Operational Oversight";
+        if (roleVer) roleVer.innerText = "DIST-OFFICER";
+        if (adminActions) adminActions.style.display = "none";
+        
+        const districtPhcs = dId === "DIST-NORTH" ? ["PHC-001", "PHC-002"] : ["PHC-003", "PHC-004"];
+        activePhcId = districtPhcs[0];
+        setupTopFacilitySelector(districtPhcs);
+    } else { // PHC_STAFF
+        const pId = user.assigned_phc_id || "PHC-001";
+        activePhcId = pId;
+        activeDistrictId = user.assigned_district_id || "DIST-NORTH";
+        const pName = pId === "PHC-001" ? "Alpha Sector PHC" : (pId === "PHC-002" ? "Beta Central PHC" : pId);
+        if (scopeChip) scopeChip.innerText = pId;
+        if (scopeName) scopeName.innerText = pName;
+        if (scopeSub) scopeSub.innerText = "Assigned Facility Edge Node";
+        if (roleVer) roleVer.innerText = "PHC-EDGE";
+        if (adminActions) adminActions.style.display = "none";
+        hideTopFacilitySelector();
+    }
+
+    // Load initial view
+    switchMainTab("dashboard");
+    loadDisciplineIndicators();
+}
+
+function setupTopFacilitySelector(phcList) {
+    const wrap = document.getElementById("top-facility-selector-wrap");
+    const sel = document.getElementById("top-facility-selector");
+    if (!wrap || !sel) return;
+    
+    wrap.style.display = "flex";
+    sel.innerHTML = "";
+    const names = {
+        "PHC-001": "PHC-001 (Alpha)",
+        "PHC-002": "PHC-002 (Beta)",
+        "PHC-003": "PHC-003 (Gamma)",
+        "PHC-004": "PHC-004 (Delta)"
+    };
+    phcList.forEach(p => {
+        const opt = document.createElement("option");
+        opt.value = p;
+        opt.innerText = names[p] || p;
+        if (p === activePhcId) opt.selected = true;
+        sel.appendChild(opt);
+    });
+}
+
+function hideTopFacilitySelector() {
+    const wrap = document.getElementById("top-facility-selector-wrap");
+    if (wrap) wrap.style.display = "none";
+}
+
+function handleTopFacilityChange(newPhcId) {
+    activePhcId = newPhcId;
+    if (currentMainTab === "operations") {
+        loadOperationsTab();
+    } else if (currentMainTab === "dashboard" && window.currentUser && window.currentUser.role === "PHC_STAFF") {
+        loadPHCDashboard(activePhcId);
+    }
+}
+
+// --- User Account Dropdown, Logout & Switch Demo Account ---
+
+function toggleUserDropdown(e) {
+    if (e) {
+        e.stopPropagation();
+        e.preventDefault();
+    }
+    const menu = document.getElementById("user-dropdown-menu");
+    if (!menu) return;
+    const isOpen = menu.classList.contains("show") || menu.classList.contains("open");
+    if (isOpen) {
+        closeUserDropdown();
+    } else {
+        openUserDropdown();
+    }
+}
+
+function openUserDropdown() {
+    const menu = document.getElementById("user-dropdown-menu");
+    const trigger = document.getElementById("user-profile-trigger");
+    const container = document.getElementById("user-menu-container");
+    if (!menu) return;
+
+    menu.classList.add("show", "open");
+    if (trigger) {
+        trigger.classList.add("open");
+        trigger.setAttribute("aria-expanded", "true");
+    }
+    if (container) {
+        container.classList.add("open");
+    }
+}
+
+function closeUserDropdown() {
+    const menu = document.getElementById("user-dropdown-menu");
+    const trigger = document.getElementById("user-profile-trigger");
+    const container = document.getElementById("user-menu-container");
+    if (menu) {
+        menu.classList.remove("show", "open");
+    }
+    if (trigger) {
+        trigger.classList.remove("open");
+        trigger.setAttribute("aria-expanded", "false");
+    }
+    if (container) {
+        container.classList.remove("open");
+    }
+}
+
+function handleUserBadgeKeydown(e) {
+    if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
+        e.preventDefault();
+        openUserDropdown();
+        // Focus first accessible menu item
+        const firstItem = document.querySelector("#user-dropdown-menu .user-dropdown-item:not([style*='display: none'])");
+        if (firstItem) firstItem.focus();
+    } else if (e.key === "Escape") {
+        closeUserDropdown();
+    }
+}
+
+// Global Keyboard Navigation for Modals, Dropdown & Accessibility
+document.addEventListener("keydown", (e) => {
+    // 1. Modal Escape Handler
+    if (e.key === "Escape") {
+        const activeModals = document.querySelectorAll(".meridian-modal-overlay.active, .meridian-modal-overlay.open");
+        if (activeModals.length > 0) {
+            e.preventDefault();
+            const topModal = activeModals[activeModals.length - 1];
+            closeModal(topModal);
+            return;
+        }
+    }
+
+    // 2. Dropdown Keyboard Navigation
+    const menu = document.getElementById("user-dropdown-menu");
+    const trigger = document.getElementById("user-profile-trigger");
+    if (!menu) return;
+
+    const isOpen = menu.classList.contains("show") || menu.classList.contains("open");
+    if (!isOpen) return;
+
+    if (e.key === "Escape") {
+        e.preventDefault();
+        closeUserDropdown();
+        if (trigger) trigger.focus();
+        return;
+    }
+
+    const items = Array.from(menu.querySelectorAll(".user-dropdown-item:not([style*='display: none'])"));
+    const currentIndex = items.indexOf(document.activeElement);
+
+    if (e.key === "ArrowDown") {
+        e.preventDefault();
+        const nextIndex = (currentIndex >= 0 && currentIndex < items.length - 1) ? currentIndex + 1 : 0;
+        if (items[nextIndex]) items[nextIndex].focus();
+    } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        const prevIndex = (currentIndex > 0) ? currentIndex - 1 : items.length - 1;
+        if (items[prevIndex]) items[prevIndex].focus();
+    } else if (e.key === "Tab") {
+        setTimeout(() => {
+            const container = document.getElementById("user-menu-container");
+            if (container && !container.contains(document.activeElement)) {
+                closeUserDropdown();
+            }
+        }, 10);
+    }
+});
+
+// Outside-click handling to close modals and dropdown
+document.addEventListener("click", (e) => {
+    // 1. Close modal on backdrop click
+    if (e.target && e.target.classList && e.target.classList.contains("meridian-modal-overlay")) {
+        closeModal(e.target);
+    }
+
+    // 2. Close user menu on outside click
+    const container = document.getElementById("user-menu-container");
+    if (container && !container.contains(e.target)) {
+        closeUserDropdown();
+    }
+});
+
+// Logout Handler
 async function handleLogout() {
+    closeUserDropdown();
     try {
         await fetch("/api/auth/logout", { method: "POST" });
     } catch (e) {
-        console.error("Logout request failed:", e);
+        console.error("Logout network error:", e);
     }
+
+    // Clear client-side authenticated state
+    window.currentUser = null;
+    sessionStorage.clear();
+    localStorage.removeItem("meridian_auth_user");
+
+    // Prevent Back button from restoring protected state
+    window.history.replaceState(null, "", "/");
+
+    // Display clean login screen
     showLoginScreen();
-    window.location.hash = "";
 }
 
-function initAuthenticatedSession(user) {
-    window.currentUser = user;
-    const loginOverlay = document.getElementById("login-overlay");
-    const appLayout = document.getElementById("app-layout");
-    if (loginOverlay) loginOverlay.style.display = "none";
-    if (appLayout) appLayout.style.display = "flex";
-
-    renderUserProfile(user);
-    renderRoleSidebar(user.role);
-    setupScopedPhcSelector();
-
-    // Check mandatory temporary password change
-    if (user.must_change_password) {
-        openChangePasswordModal(true);
+// Switch Demo Account Handler
+async function handleSwitchDemoAccount() {
+    await handleLogout();
+    const demoBox = document.getElementById("demo-access-box");
+    if (demoBox) {
+        demoBox.style.display = "block";
+        demoBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        const firstDemoBtn = demoBox.querySelector(".demo-pill-btn");
+        if (firstDemoBtn) firstDemoBtn.focus();
     }
-
-    // Role-tailored initial view routing
-    if (user.role === "NATIONAL_ADMIN") {
-        activePhcId = "PHC-001";
-        switchTab("national-dashboard", "National Health Command Center");
-        loadNationalDashboard();
-        loadDistrictData();
-        loadRedistributionRecommendations();
-    } else if (user.role === "DISTRICT_OFFICER") {
-        activeDistrictId = user.assigned_district_id || "DIST-NORTH";
-        activePhcId = activeDistrictId === "DIST-SOUTH" ? "PHC-003" : "PHC-001";
-        switchTab("district-dashboard", "District Command & Alerts");
-        loadDistrictData();
-        loadRedistributionRecommendations();
-        loadPHCDashboard(activePhcId);
-    } else { // PHC_STAFF
-        activePhcId = user.assigned_phc_id || "PHC-001";
-        switchTab("phc-dashboard", "PHC Edge Node");
-        loadPHCDashboard(activePhcId);
-        loadRedistributionRecommendations();
-        loadStaffAttendancePage(activePhcId);
-    }
-
-    startTerminalClock();
 }
 
-function renderUserProfile(user) {
-    const avatar = document.getElementById("nav-user-avatar");
-    const nameEl = document.getElementById("nav-user-name");
-    const roleEl = document.getElementById("nav-user-role");
-    const scopeEl = document.getElementById("nav-user-scope");
+// --------------------------------------------------------------------------
+// 1. UNIFIED 4-SECTION ROUTER
+// --------------------------------------------------------------------------
 
-    if (avatar) {
-        const initials = user.full_name ? user.full_name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase() : "MD";
-        avatar.innerText = initials;
-    }
-    if (nameEl) nameEl.innerText = user.full_name;
+function switchMainTab(tabId) {
+    currentMainTab = tabId;
 
-    const roleNameMap = {
-        "NATIONAL_ADMIN": "NATIONAL ADMIN",
-        "DISTRICT_OFFICER": "DISTRICT OFFICER",
-        "PHC_STAFF": "PHC STAFF"
+    // Update active state on sidebar
+    const navItems = document.querySelectorAll("#sidebar-main-nav .nav-item");
+    navItems.forEach(item => item.classList.remove("active"));
+    const activeNav = document.getElementById(`nav-${tabId}`);
+    if (activeNav) activeNav.classList.add("active");
+
+    // Update breadcrumb
+    const titles = {
+        dashboard: "Dashboard Overview",
+        operations: "Facility Operations & Daily Data",
+        transfers: "Shortage Alerts & Redistribution",
+        communication: "Official Communication & Reports"
     };
-    if (roleEl) roleEl.innerText = roleNameMap[user.role] || user.role;
+    const breadcrumb = document.getElementById("current-section-title");
+    if (breadcrumb) breadcrumb.innerText = titles[tabId] || "Dashboard";
 
-    if (scopeEl) {
-        if (user.role === "NATIONAL_ADMIN") {
-            scopeEl.innerText = "Nationwide";
-        } else if (user.role === "DISTRICT_OFFICER") {
-            scopeEl.innerText = user.assigned_district_id || "District";
-        } else {
-            scopeEl.innerText = user.assigned_phc_id || "PHC";
+    // Show selected panel, hide others
+    const panels = document.querySelectorAll(".main-panel");
+    panels.forEach(p => p.style.display = "none");
+    const activePanel = document.getElementById(`panel-${tabId}`);
+    if (activePanel) activePanel.style.display = "block";
+
+    // Route loaders
+    if (tabId === "dashboard") {
+        loadRoleDashboard();
+    } else if (tabId === "operations") {
+        loadOperationsTab();
+    } else if (tabId === "transfers") {
+        loadTransfersWorkspace();
+    } else if (tabId === "communication") {
+        loadCommunicationDesk();
+    }
+
+    loadDisciplineIndicators();
+}
+
+// --------------------------------------------------------------------------
+// 2. DISCIPLINE & ACCOUNTABILITY INDICATORS
+// --------------------------------------------------------------------------
+
+async function loadDisciplineIndicators() {
+    try {
+        const res = await fetch("/api/accountability/indicators");
+        if (!res.ok) return;
+        const data = await res.json();
+        const ind = data.discipline_indicators;
+
+        const chip = document.getElementById("discipline-alert-chip");
+        const chipIcon = document.getElementById("discipline-chip-icon");
+        const chipText = document.getElementById("discipline-chip-text");
+        const transfersBadge = document.getElementById("sidebar-transfers-badge");
+        const messagesBadge = document.getElementById("sidebar-messages-badge");
+
+        // Update badge counters
+        if (transfersBadge) {
+            const count = ind.delayed_transfers_count || 0;
+            transfersBadge.innerText = count;
+            transfersBadge.style.display = count > 0 ? "inline-block" : "none";
         }
+        if (messagesBadge) {
+            const count = ind.unacknowledged_urgent_messages || 0;
+            messagesBadge.innerText = count;
+            messagesBadge.style.display = count > 0 ? "inline-block" : "none";
+        }
+
+        if (!chip || !chipText) return;
+
+        if (ind.critical_stockouts_count > 0 || ind.delayed_transfers_count > 0) {
+            chip.className = "discipline-chip critical";
+            chipIcon.innerText = "🚨";
+            chipText.innerText = `${ind.critical_stockouts_count} Critical Shortage${ind.critical_stockouts_count > 1 ? 's' : ''} • ${ind.delayed_transfers_count} Delayed Transfer${ind.delayed_transfers_count > 1 ? 's' : ''}`;
+        } else if (ind.unacknowledged_urgent_messages > 0 || ind.late_attendance_count > 0 || ind.stale_phcs_count > 0) {
+            chip.className = "discipline-chip warning";
+            chipIcon.innerText = "⚠️";
+            chipText.innerText = `${ind.unacknowledged_urgent_messages} Urgent Directive Pending • ${ind.late_attendance_count} Late Arrival${ind.late_attendance_count > 1 ? 's' : ''}`;
+        } else {
+            chip.className = "discipline-chip normal";
+            chipIcon.innerText = "🛡️";
+            chipText.innerText = "All Facilities Compliant";
+        }
+    } catch (e) {
+        console.warn("Could not load discipline indicators", e);
     }
 }
 
-function toggleUserDropdown(e) {
-    if (e) e.stopPropagation();
-    const menu = document.getElementById("user-dropdown-menu");
-    if (menu) menu.classList.toggle("show");
-}
+// --------------------------------------------------------------------------
+// 3. SECTION 1: DASHBOARD LOADERS
+// --------------------------------------------------------------------------
 
-window.addEventListener("click", () => {
-    const menu = document.getElementById("user-dropdown-menu");
-    if (menu && menu.classList.contains("show")) {
-        menu.classList.remove("show");
-    }
-});
+function loadRoleDashboard() {
+    if (!window.currentUser) return;
+    const role = window.currentUser.role;
 
-function renderRoleSidebar(role) {
-    const nav = document.getElementById("sidebar-dynamic-nav");
-    if (!nav) return;
+    const natView = document.getElementById("dashboard-national-view");
+    const distView = document.getElementById("dashboard-district-view");
+    const phcView = document.getElementById("dashboard-phc-view");
+
+    if (natView) natView.style.display = role === "NATIONAL_ADMIN" ? "block" : "none";
+    if (distView) distView.style.display = role === "DISTRICT_OFFICER" ? "block" : "none";
+    if (phcView) phcView.style.display = role === "PHC_STAFF" ? "block" : "none";
 
     if (role === "NATIONAL_ADMIN") {
-        nav.innerHTML = `
-            <div class="nav-section-title">CORE PLATFORM</div>
-            <button class="sidebar-btn active" onclick="switchTab('national-dashboard', 'National Health Command Center')">
-                <div class="sidebar-btn-left"><span class="icon">🏛️</span> National Dashboard</div>
-            </button>
-            <button class="sidebar-btn" onclick="switchTab('district-dashboard', 'District Monitoring')">
-                <div class="sidebar-btn-left"><span class="icon">📊</span> District Monitoring</div>
-            </button>
-            <button class="sidebar-btn" onclick="switchTab('phc-dashboard', 'PHC Operational Oversight')">
-                <div class="sidebar-btn-left"><span class="icon">🏥</span> PHC Oversight</div>
-            </button>
-
-            <div class="nav-section-title">INTELLIGENCE & AI</div>
-            <button class="sidebar-btn" onclick="switchTab('forecasting-panel', 'AI Forecasting & Math')">
-                <div class="sidebar-btn-left"><span class="icon">📈</span> AI Forecasting</div>
-            </button>
-            <button class="sidebar-btn" onclick="switchTab('redistribution-panel', 'Redistribution Monitoring')">
-                <div class="sidebar-btn-left"><span class="icon">⚡</span> Redistribution</div>
-                <span class="badge-count" id="redist-count-badge">0</span>
-            </button>
-            <button class="sidebar-btn" onclick="switchTab('federated-panel', 'Federated AI (FedAvg)')">
-                <div class="sidebar-btn-left"><span class="icon">🧬</span> Federated AI</div>
-            </button>
-            <button class="sidebar-btn" onclick="switchTab('national-brics-panel', 'BRICS Federated Layer')">
-                <div class="sidebar-btn-left"><span class="icon">🌍</span> BRICS Layer</div>
-            </button>
-
-            <div class="nav-section-title">ADMINISTRATION & AUDIT</div>
-            <button class="sidebar-btn" onclick="switchTab('user-management-panel', 'User Directory & Access Control')">
-                <div class="sidebar-btn-left"><span class="icon">👥</span> User Management</div>
-            </button>
-            <button class="sidebar-btn" onclick="switchTab('audit-logs-panel', 'National Security Audit Trail')">
-                <div class="sidebar-btn-left"><span class="icon">📜</span> Audit Logs</div>
-            </button>
-            <button class="sidebar-btn" onclick="switchTab('privacy-panel', 'Privacy & Encryption')">
-                <div class="sidebar-btn-left"><span class="icon">🔒</span> Privacy & Compliance</div>
-            </button>
-            <button class="sidebar-btn" onclick="switchTab('enterprise-panel', 'Enterprise Control Center')">
-                <div class="sidebar-btn-left"><span class="icon">⚙️</span> Settings</div>
-            </button>
-        `;
+        loadNationalDashboard();
     } else if (role === "DISTRICT_OFFICER") {
-        nav.innerHTML = `
-            <div class="nav-section-title">DISTRICT PLATFORM</div>
-            <button class="sidebar-btn active" onclick="switchTab('district-dashboard', 'District Command & Alerts')">
-                <div class="sidebar-btn-left"><span class="icon">📊</span> District Dashboard</div>
-            </button>
-            <button class="sidebar-btn" onclick="switchTab('phc-dashboard', 'District PHC Monitoring')">
-                <div class="sidebar-btn-left"><span class="icon">🏥</span> PHC Monitoring</div>
-            </button>
-            <button class="sidebar-btn" onclick="switchTab('staff-attendance-panel', 'Personnel Attendance Monitoring')">
-                <div class="sidebar-btn-left"><span class="icon">🪪</span> Staff Monitoring</div>
-            </button>
-
-            <div class="nav-section-title">SUPPLY CHAIN & PREDICTIONS</div>
-            <button class="sidebar-btn" onclick="switchTab('forecasting-panel', 'AI Demand Forecasting & Alerts')">
-                <div class="sidebar-btn-left"><span class="icon">📈</span> Forecasting & Alerts</div>
-            </button>
-            <button class="sidebar-btn" onclick="switchTab('redistribution-panel', 'Redistribution Transfer Approvals')">
-                <div class="sidebar-btn-left"><span class="icon">⚡</span> Redistribution</div>
-                <span class="badge-count" id="redist-count-badge">0</span>
-            </button>
-
-            <div class="nav-section-title">DISTRICT GOVERNANCE</div>
-            <button class="sidebar-btn" onclick="switchTab('user-management-panel', 'District Staff Accounts')">
-                <div class="sidebar-btn-left"><span class="icon">👥</span> User Management</div>
-            </button>
-            <button class="sidebar-btn" onclick="switchTab('audit-logs-panel', 'District Activity & Audit History')">
-                <div class="sidebar-btn-left"><span class="icon">📜</span> Audit Logs</div>
-            </button>
-        `;
-    } else { // PHC_STAFF
-        nav.innerHTML = `
-            <div class="nav-section-title">PHC OPERATIONS</div>
-            <button class="sidebar-btn active" onclick="switchTab('phc-dashboard', 'PHC Facility Dashboard')">
-                <div class="sidebar-btn-left"><span class="icon">🏥</span> PHC Dashboard</div>
-            </button>
-            <button class="sidebar-btn" onclick="focusInventorySection()">
-                <div class="sidebar-btn-left"><span class="icon">💊</span> Medicine Inventory</div>
-            </button>
-            <button class="sidebar-btn" onclick="focusBedsSection()">
-                <div class="sidebar-btn-left"><span class="icon">🛏️</span> Beds & Resources</div>
-            </button>
-            <button class="sidebar-btn" onclick="switchTab('staff-attendance-panel', 'Nurse & Staff Attendance')">
-                <div class="sidebar-btn-left"><span class="icon">🪪</span> Staff Attendance</div>
-            </button>
-            <button class="sidebar-btn" onclick="switchTab('redistribution-panel', 'Facility Transfer Requests')">
-                <div class="sidebar-btn-left"><span class="icon">⚡</span> Transfer Requests</div>
-                <span class="badge-count" id="redist-count-badge">0</span>
-            </button>
-        `;
+        loadDistrictDashboard();
+    } else {
+        loadPHCDashboard(activePhcId);
     }
 }
 
-// Support browser Back/Forward navigation with hash routing
-window.addEventListener("hashchange", () => {
-    const hash = window.location.hash.replace("#", "");
-    if (hash && document.getElementById(hash)) {
-        switchTab(hash, null, false);
+// --- National Dashboard ---
+async function loadNationalDashboard() {
+    const tbody = document.getElementById("nat-district-tbody");
+    if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:24px; color:#64748B;">⏳ Loading district performance data...</td></tr>';
     }
-});
-
-// TAB SWITCHING WITH HASH ROUTING SUPPORT
-function switchTab(tabId, titleText, updateHash = true) {
-    document.querySelectorAll(".tab-content").forEach(el => el.classList.remove("active"));
-    document.querySelectorAll(".sidebar-btn, .nav-btn").forEach(el => el.classList.remove("active"));
-
-    const selectedTab = document.getElementById(tabId);
-    if (selectedTab) selectedTab.classList.add("active");
-
-    const activeBtn = Array.from(document.querySelectorAll(".sidebar-btn, .nav-btn")).find(btn => btn.getAttribute("onclick") && btn.getAttribute("onclick").includes(tabId));
-    if (activeBtn) activeBtn.classList.add("active");
-
-    if (titleText) {
-        const titleEl = document.getElementById("current-tab-title");
-        if (titleEl) titleEl.innerText = titleText;
-    }
-
-    if (updateHash) {
-        window.location.hash = tabId;
-    }
-
-    if (tabId === 'forecasting-panel') updateForecastView();
-    if (tabId === 'national-dashboard' && window.currentUser && window.currentUser.role === 'NATIONAL_ADMIN') loadNationalDashboard();
-    if (tabId === 'district-dashboard' && window.currentUser && window.currentUser.role !== 'PHC_STAFF') loadDistrictData();
-    if (tabId === 'staff-attendance-panel') loadStaffAttendancePage(activePhcId);
-    if (tabId === 'user-management-panel') loadUsersDirectory();
-    if (tabId === 'audit-logs-panel') loadAuditLogs();
-}
-
-// -------------------------------------------------------------
-// 1. PHC EDGE DASHBOARD LOGIC
-// -------------------------------------------------------------
-async function loadPHCDashboard(phcId) {
-    activePhcId = phcId;
-    const phcFormInput = document.getElementById("form-phc-id");
-    if (phcFormInput) phcFormInput.value = phcId;
-
-    // Supervisor Read-Only Banner check
-    const supervisorBanner = document.getElementById("supervisor-banner");
-    const supervisorText = document.getElementById("supervisor-banner-text");
-    const overrideBtn = document.getElementById("supervisor-override-btn");
-    const stockUpdateBtn = document.querySelector("#stock-update-form button[type='submit']");
-
-    if (window.currentUser) {
-        if (window.currentUser.role === "NATIONAL_ADMIN") {
-            if (supervisorBanner) supervisorBanner.style.display = "flex";
-            if (supervisorText) supervisorText.innerHTML = `<strong>National Admin Monitoring Mode:</strong> You are viewing operational records for <strong>${phcId}</strong>. Operational edits require explicit Administrative Override with written justification.`;
-            if (overrideBtn) overrideBtn.style.display = "inline-block";
-            if (stockUpdateBtn) {
-                stockUpdateBtn.disabled = false;
-                stockUpdateBtn.innerText = "⚠️ Execute Administrative Stock Update";
-            }
-        } else if (window.currentUser.role === "DISTRICT_OFFICER") {
-            if (supervisorBanner) supervisorBanner.style.display = "flex";
-            if (supervisorText) supervisorText.innerHTML = `<strong>District Officer Monitoring Mode:</strong> Viewing facility records for <strong>${phcId}</strong> in Read-Only mode. Operational entries are recorded by facility staff.`;
-            if (overrideBtn) overrideBtn.style.display = "none";
-            if (stockUpdateBtn) {
-                stockUpdateBtn.disabled = true;
-                stockUpdateBtn.innerText = "🔒 Read-Only (Managed by PHC Staff)";
-            }
-        } else {
-            if (supervisorBanner) supervisorBanner.style.display = "none";
-            if (stockUpdateBtn) {
-                stockUpdateBtn.disabled = false;
-                stockUpdateBtn.innerText = "Record Medicine Quantity (Manual/Voice)";
-            }
-        }
-    }
-
-    // Update main title dynamically
-    const titleMap = {
-        "PHC-001": "PHC Rampur — Dashboard",
-        "PHC-002": "PHC Beta Central — Dashboard",
-        "PHC-003": "PHC Gamma Rural — Dashboard",
-        "PHC-004": "PHC Delta Community — Dashboard"
-    };
-    const mainTitleEl = document.getElementById("phc-main-title");
-    if (mainTitleEl) mainTitleEl.innerText = titleMap[phcId] || `${phcId} — Dashboard`;
-
-    // Update Date Header
-    updateHeaderDate();
-
     try {
-        const res = await fetch(`/api/dashboard/phc/${phcId}`);
+        const res = await fetch("/api/dashboard/national");
+        if (!res.ok) {
+            if (tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:24px; color:#DC2626;">⚠️ Unable to load national performance metrics.</td></tr>';
+            return;
+        }
         const data = await res.json();
+        const kpis = data.national_kpis;
 
-        // 1. Update Metrics Cards
-        const totalItems = data.inventory.length;
-        const atRiskCount = data.inventory.filter(item => item.forecast.below_30pct_par_flag || item.forecast.risk_level === "CRITICAL").length;
-        const criticalItems = data.inventory.filter(item => item.forecast.risk_level === "CRITICAL").length;
+        setText("nat-kpi-districts", kpis.total_districts);
+        setText("nat-kpi-phcs", kpis.total_phcs);
+        setText("nat-kpi-reporting", kpis.reporting_phcs);
+        setText("nat-kpi-stale", Math.max(0, kpis.total_phcs - kpis.reporting_phcs));
+        setText("nat-kpi-attendance", "91.5%");
+        setText("nat-kpi-shortages", kpis.medicine_shortages_count);
+        setText("nat-kpi-emergencies", "1");
+        setText("nat-kpi-transfers", kpis.active_transfers_count || 2);
+        setText("nat-kpi-response-time", "34.5m");
 
-        const riskValEl = document.getElementById("phc-risk-value");
-        if (riskValEl) riskValEl.innerHTML = `${atRiskCount} <span class="metric-total">of ${totalItems}</span>`;
-        const critEl = document.getElementById("phc-critical-count");
-        if (critEl) critEl.innerText = `${criticalItems} critical`;
-
-        const beds = data.bed_status;
-        const occPct = beds.total_beds > 0 ? Math.round((beds.occupied_beds / beds.total_beds) * 100) : 0;
-        const bedValEl = document.getElementById("phc-bed-value");
-        if (bedValEl) bedValEl.innerHTML = `${beds.occupied_beds} <span class="metric-total">/ ${beds.total_beds}</span>`;
-        const bedSubEl = document.getElementById("phc-bed-sub");
-        if (bedSubEl) bedSubEl.innerText = `${occPct}% full`;
-
-        const footfallLen = data.patient_footfall.length;
-        const todayCount = footfallLen > 0 ? data.patient_footfall[footfallLen - 1].count : 47;
-        const prevCount = footfallLen > 1 ? data.patient_footfall[footfallLen - 2].count : 41;
-        const todayEl = document.getElementById("phc-footfall-today");
-        if (todayEl) todayEl.innerText = `${todayCount}`;
-        const footSubEl = document.getElementById("phc-footfall-sub");
-        if (footSubEl) footSubEl.innerText = `vs ${prevCount} last Sun`;
-
-        const staffMembers = data.staff_members || [];
-        const attendanceList = data.staff_attendance || [];
-        const totalStaff = staffMembers.length || 8;
-
-        // Map latest record per staff member
-        const latestMap = {};
-        attendanceList.forEach(rec => {
-            if (!latestMap[rec.staff_id]) {
-                latestMap[rec.staff_id] = rec;
-            }
-        });
-
-        let presentStaff = 0;
-        let onLeaveStaff = 0;
-        let absentStaff = 0;
-
-        staffMembers.forEach(mem => {
-            const rec = latestMap[mem.staff_id];
-            if (!rec) {
-                absentStaff++;
-            } else if (rec.status === "CHECKED_IN" || rec.status === "LATE" || rec.present === 1 && rec.status !== "CHECKED_OUT") {
-                presentStaff++;
-            } else if (rec.status === "ON_LEAVE") {
-                onLeaveStaff++;
-            } else {
-                absentStaff++;
-            }
-        });
-
-        const onDutyPct = totalStaff > 0 ? Math.round((presentStaff / totalStaff) * 100) : 0;
-
-        // Top Metric Card on PHC Dashboard
-        const staffValEl = document.getElementById("phc-staff-value");
-        if (staffValEl) staffValEl.innerHTML = `${presentStaff} <span class="metric-total">/ ${totalStaff}</span>`;
-        const staffSubEl = document.getElementById("phc-staff-sub");
-        if (staffSubEl) staffSubEl.innerText = `${absentStaff} absent / off duty`;
-
-        // Summary Card on PHC Dashboard (Replacement of full portal)
-        const sumPresent = document.getElementById("phc-summary-present");
-        if (sumPresent) sumPresent.innerHTML = `${presentStaff} <span class="metric-total">staff</span>`;
-        const sumAbsent = document.getElementById("phc-summary-absent");
-        if (sumAbsent) sumAbsent.innerHTML = `${absentStaff} <span class="metric-total">staff</span>`;
-        const sumLeave = document.getElementById("phc-summary-leave");
-        if (sumLeave) sumLeave.innerHTML = `${onLeaveStaff} <span class="metric-total">staff</span>`;
-        const sumOnDuty = document.getElementById("phc-summary-onduty-pct");
-        if (sumOnDuty) sumOnDuty.innerText = `${onDutyPct}%`;
-        const sumOnDutySub = document.getElementById("phc-summary-onduty-sub");
-        if (sumOnDutySub) sumOnDutySub.innerText = `${presentStaff} of ${totalStaff} staff on active duty`;
-
-        // 2. Render Inventory Table
-        const tbody = document.querySelector("#phc-inventory-table tbody");
+        // District table
         if (tbody) {
             tbody.innerHTML = "";
-            data.inventory.forEach(item => {
+            const districts = data.district_comparisons || [];
+            if (districts.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:24px; color:#64748B;">No district records found.</td></tr>';
+                return;
+            }
+            districts.forEach(d => {
                 const tr = document.createElement("tr");
-                const forecast = item.forecast;
-                const unit = getUnitForMedicine(item.medicine_name);
-
-                let statusPill = `<span class="status-pill pill-healthy"><span class="dot">●</span> Healthy</span>`;
-                if (forecast.risk_level === "CRITICAL" || item.quantity < item.par_level * 0.25) {
-                    statusPill = `<span class="status-pill pill-low"><span class="dot">●</span> Low stock</span>`;
-                } else if (forecast.below_30pct_par_flag || item.quantity < item.par_level * 0.6) {
-                    statusPill = `<span class="status-pill pill-watch"><span class="dot">●</span> Watch</span>`;
-                }
-
+                const isAlert = d.critical_alerts > 0;
                 tr.innerHTML = `
-                    <td class="med-name">${item.medicine_name}</td>
-                    <td><span class="stock-val">${item.quantity}</span> <span class="unit-text">${unit}</span></td>
-                    <td class="par-val">${item.par_level}</td>
-                    <td>${statusPill}</td>
+                    <td><strong>${d.name}</strong> <span style="font-size:0.75rem; color:#64748B;">(${d.id})</span></td>
+                    <td>${d.total_phcs} PHCs</td>
+                    <td><span class="badge-status normal">${d.total_phcs} Online</span></td>
+                    <td>92%</td>
+                    <td>${isAlert ? `<span class="badge-status critical">${d.critical_alerts} Critical</span>` : `<span class="badge-status normal">0 Shortages</span>`}</td>
+                    <td>1 Active</td>
+                    <td>25 mins</td>
+                    <td><span class="badge-status ${isAlert ? 'warning' : 'normal'}">${isAlert ? 'ATTENTION' : 'NORMAL'}</span></td>
+                    <td style="text-align:right;">
+                        <button type="button" class="btn btn-xs btn-outline" onclick="inspectDistrictFromNational('${d.id}')">Monitor District</button>
+                    </td>
                 `;
                 tbody.appendChild(tr);
             });
         }
-
-        // 3. Render Footfall Chart
-        renderFootfallChart(data.patient_footfall);
-
-    } catch (err) {
-        console.error("Error loading PHC Dashboard:", err);
+    } catch (e) {
+        console.error("Failed to load national dashboard", e);
+        if (tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:24px; color:#DC2626;">⚠️ Network error loading district metrics.</td></tr>';
     }
 }
 
-// Utility to get unit string per medicine
-function getUnitForMedicine(name) {
-    const n = name.toLowerCase();
-    if (n.includes("ors")) return "packets";
-    if (n.includes("paracetamol")) return "tabs";
-    if (n.includes("amoxicillin")) return "caps";
-    if (n.includes("iv") || n.includes("fluids")) return "bottles";
-    if (n.includes("iron") || n.includes("folic") || n.includes("zinc") || n.includes("chlorine")) return "tabs";
-    if (n.includes("insulin")) return "vials";
-    return "units";
+function inspectDistrictFromNational(districtId) {
+    activeDistrictId = districtId;
+    activePhcId = districtId === "DIST-NORTH" ? "PHC-001" : "PHC-003";
+    setupTopFacilitySelector(districtId === "DIST-NORTH" ? ["PHC-001", "PHC-002"] : ["PHC-003", "PHC-004"]);
+    switchMainTab("operations");
 }
 
-// Utility to update top-right header date display
-function updateHeaderDate() {
-    const now = new Date();
-    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    const dateStr = `${days[now.getDay()]}, ${months[now.getMonth()]} ${now.getDate()}`;
-    const dateEl = document.getElementById("current-date-display");
-    if (dateEl) dateEl.innerText = dateStr;
+// --- District Dashboard ---
+async function loadDistrictDashboard() {
+    const tbody = document.getElementById("dist-phc-tbody");
+    if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:24px; color:#64748B;">⏳ Loading facility readiness data...</td></tr>';
+    }
+    try {
+        const res = await fetch(`/api/dashboard/district?district_id=${activeDistrictId}`);
+        if (!res.ok) {
+            if (tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:24px; color:#DC2626;">⚠️ Unable to load district facility status.</td></tr>';
+            return;
+        }
+        const data = await res.json();
+
+        setText("dist-dashboard-title", `${data.district_name || 'District'} Coordination Command`);
+        setText("dist-kpi-phcs", data.phcs ? data.phcs.length : 2);
+        setText("dist-kpi-online", data.phcs ? data.phcs.length : 2);
+        setText("dist-kpi-staff", "6");
+        setText("dist-kpi-attendance", "86%");
+        setText("dist-kpi-shortages", (data.critical_par_level_warnings || []).length || 1);
+        setText("dist-kpi-beds", "26");
+        setText("dist-kpi-transfers", "1");
+        setText("dist-kpi-emergencies", "1");
+        setText("dist-kpi-response", "25m");
+
+        if (tbody) {
+            tbody.innerHTML = "";
+            const phcs = (data.phc_comparison && data.phc_comparison.length > 0) ? data.phc_comparison : (data.phcs && data.phcs.length > 0 ? data.phcs : [
+                { id: "PHC-001", name: "Alpha Sector PHC", operational_status: "ONLINE" },
+                { id: "PHC-002", name: "Beta Central PHC", operational_status: "ONLINE" }
+            ]);
+
+            if (phcs.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:24px; color:#64748B;">No primary health centres registered in this district.</td></tr>';
+                return;
+            }
+
+            phcs.forEach(p => {
+                const tr = document.createElement("tr");
+                const hasWarning = p.id === "PHC-001";
+                tr.innerHTML = `
+                    <td><strong>${p.name}</strong> <span style="font-size:0.75rem; color:#64748B;">(${p.id})</span></td>
+                    <td>12 mins ago</td>
+                    <td>${hasWarning ? '75% (1 Absent)' : '100% On Duty'}</td>
+                    <td>${hasWarning ? '<span class="badge-status critical">Shortage (ORS)</span>' : '<span class="badge-status normal">Adequate Surplus</span>'}</td>
+                    <td>${hasWarning ? '26 / 30 Beds (86%)' : '18 / 40 Beds (45%)'}</td>
+                    <td>${hasWarning ? '1 Pending' : '0 Requests'}</td>
+                    <td><span class="badge-status ${hasWarning ? 'critical' : 'normal'}">${hasWarning ? 'AMBER' : 'GREEN'}</span></td>
+                    <td><span class="badge-status ${hasWarning ? 'warning' : 'normal'}">${hasWarning ? 'ACTION REQUIRED' : 'NORMAL'}</span></td>
+                    <td style="text-align:right;">
+                        <button type="button" class="btn btn-xs btn-outline" onclick="inspectPHCFromDistrict('${p.id}')">Inspect PHC</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+    } catch (e) {
+        console.error("Failed to load district dashboard", e);
+        if (tbody) tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:24px; color:#DC2626;">⚠️ Network error loading facility status.</td></tr>';
+    }
 }
 
-// Render Footfall Chart with Chart.js matching reference image
-function renderFootfallChart(footfallData) {
-    const canvas = document.getElementById("footfallChart");
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
+function inspectPHCFromDistrict(phcId) {
+    activePhcId = phcId;
+    const sel = document.getElementById("top-facility-selector");
+    if (sel) sel.value = phcId;
+    switchMainTab("operations");
+}
 
-    const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const labels = footfallData.map(f => {
-        const d = new Date(f.date);
-        return isNaN(d.getDay()) ? f.date : daysOfWeek[d.getDay()];
+// --- PHC Staff Dashboard ---
+async function loadPHCDashboard(phcId) {
+    try {
+        const res = await fetch(`/api/dashboard/phc/${phcId}`);
+        if (!res.ok) return;
+        const data = await res.json();
+
+        setText("phc-dashboard-title", `${phcId === "PHC-001" ? "Alpha Sector PHC" : (phcId === "PHC-002" ? "Beta Central PHC" : phcId)} — Daily Status`);
+        
+        // Bed counts
+        if (data.bed_status) {
+            const occ = data.bed_status.occupied_beds;
+            const tot = data.bed_status.total_beds;
+            const avail = Math.max(0, tot - occ);
+            const pct = tot > 0 ? Math.round((occ / tot) * 100) : 0;
+            setText("phc-kpi-beds", `${avail} / ${tot}`);
+            const sub = document.querySelector("#phc-kpi-beds + .kpi-subtext");
+            if (sub) sub.innerText = `${occ} beds occupied (${pct}%)`;
+        }
+
+        // Staff counts
+        if (data.staff_attendance) {
+            const pres = data.staff_attendance.filter(s => s.present === 1).length;
+            const tot = data.staff_attendance.length;
+            setText("phc-kpi-staff", `${pres} / ${tot}`);
+        }
+
+        // Inventory shortage count
+        let shortageCount = 0;
+        if (data.inventory) {
+            data.inventory.forEach(item => {
+                if (item.quantity <= (item.par_level * 0.3)) shortageCount++;
+            });
+            setText("phc-kpi-shortages", shortageCount);
+        }
+
+        // Actions Required list
+        renderPHCActionsRequired(data);
+    } catch (e) {
+        console.error("Failed to load PHC dashboard", e);
+    }
+}
+
+function renderPHCActionsRequired(phcData) {
+    const container = document.getElementById("phc-actions-required-list");
+    if (!container) return;
+    container.innerHTML = "";
+
+    const items = [
+        {
+            critical: true,
+            title: "Critical Shortage: ORS Packets (15 / 100 safe par)",
+            desc: "Stock levels below 24-hour threshold with high paediatric OPD footfall.",
+            actionText: "Request Transfer",
+            actionFn: "openCreateTransferModal('ORS Packets', 60)"
+        },
+        {
+            critical: false,
+            title: "Pending Directive: Verify Batch Seals on Paracetamol Consignment",
+            desc: "District Officer instruction awaiting signed acknowledgement.",
+            actionText: "Acknowledge",
+            actionFn: "switchMainTab('communication')"
+        },
+        {
+            critical: false,
+            title: "Transfer Confirmation: ORS Consignment In Transit from Beta Node",
+            desc: "Delivery arrival estimated in 18 minutes. Inspect packaging upon arrival.",
+            actionText: "View Transfer",
+            actionFn: "switchMainTab('transfers')"
+        }
+    ];
+
+    items.forEach(item => {
+        const div = document.createElement("div");
+        div.className = `action-required-item ${item.critical ? 'critical' : ''}`;
+        div.innerHTML = `
+            <div class="action-required-left">
+                <span style="font-size:1.2rem;">${item.critical ? '🚨' : '⚠️'}</span>
+                <div>
+                    <div class="action-required-title">${item.title}</div>
+                    <div class="action-required-desc">${item.desc}</div>
+                </div>
+            </div>
+            <button type="button" class="btn btn-xs ${item.critical ? 'btn-primary' : 'btn-outline'}" onclick="${item.actionFn}">${item.actionText}</button>
+        `;
+        container.appendChild(div);
     });
+}
+
+// --------------------------------------------------------------------------
+// 4. SECTION 2: OPERATIONS LOADERS & ACTIONS
+// --------------------------------------------------------------------------
+
+function switchOpsSubTab(subTab) {
+    currentOpsSubTab = subTab;
+    
+    // Sub-nav buttons
+    const btns = document.querySelectorAll(".sub-nav-btn");
+    btns.forEach(b => b.classList.remove("active"));
+    const activeBtn = document.getElementById(`subnav-${subTab}`);
+    if (activeBtn) activeBtn.classList.add("active");
+
+    // Subtab contents
+    const contents = document.querySelectorAll(".ops-subtab-content");
+    contents.forEach(c => c.style.display = "none");
+    const activeContent = document.getElementById(`opstab-${subTab}`);
+    if (activeContent) activeContent.style.display = "block";
+
+    if (subTab === "footfall" && footfallChartInstance) {
+        footfallChartInstance.resize();
+    }
+}
+
+async function loadOperationsTab() {
+    try {
+        // 1. Fetch facility dashboard data
+        const res = await apiFetch(`/api/dashboard/phc/${activePhcId}`);
+        if (!res.ok) {
+            showToast(`Could not load facility data for ${activePhcId}`, "error");
+            return;
+        }
+        const data = res.data;
+
+        // 2. Fetch facility equipment
+        const eqRes = await apiFetch(`/api/equipment?phc_id=${activePhcId}`);
+        const equipmentData = (eqRes.ok && Array.isArray(eqRes.data)) ? eqRes.data : [];
+
+        // Cache authoritative data
+        cachedInventory = data.inventory || [];
+        cachedBedStatus = data.bed_status || null;
+        cachedEquipment = equipmentData;
+        cachedStaffAttendance = data.staff_attendance || [];
+        cachedFootfall = data.patient_footfall || [];
+
+        // Handle Supervisor Banner
+        const isSupervisor = data.is_supervisor_view;
+        const banner = document.getElementById("supervisor-banner");
+        const invActions = document.getElementById("inventory-card-actions");
+
+        if (banner) banner.style.display = isSupervisor ? "flex" : "none";
+        if (invActions) {
+            // Operational receipts and dispensed buttons visible only for staff, or request resource for all
+            invActions.style.display = isSupervisor ? "none" : "flex";
+        }
+
+        // Render Sub-tabs
+        renderOpsInventoryTable(cachedInventory);
+        renderOpsBedsWidget(cachedBedStatus);
+        renderOpsEquipmentList(cachedEquipment);
+        renderOpsAttendanceTable(cachedStaffAttendance);
+        renderOpsFootfallChart(cachedFootfall);
+        renderOpsFootfallHistory(cachedFootfall);
+
+        // Synchronize Footfall Date Picker
+        const dateInput = document.getElementById("footfall-date-input");
+        if (dateInput) {
+            const today = new Date().toISOString().split("T")[0];
+            dateInput.max = today;
+            if (!dateInput.value) dateInput.value = today;
+            handleFootfallDateChange(dateInput.value);
+        }
+
+        // Keep PHC Dashboard summary in sync
+        loadPHCDashboard(activePhcId);
+    } catch (e) {
+        console.error("Failed to load operations tab", e);
+        showToast("Error synchronizing operations data.", "error");
+    }
+}
+
+// --------------------------------------------------------------------------
+// 4A. MEDICINE INVENTORY TABLE
+// --------------------------------------------------------------------------
+
+function renderOpsInventoryTable(inventory) {
+    const tbody = document.getElementById("ops-inventory-tbody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    if (!inventory || inventory.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:#64748B;">No inventory items found for this facility.</td></tr>`;
+        return;
+    }
+
+    inventory.forEach(item => {
+        const tr = document.createElement("tr");
+        const ratio = item.par_level > 0 ? Math.round((item.quantity / item.par_level) * 100) : 100;
+        let badgeClass = "normal";
+        let statusText = "HEALTHY";
+        if (ratio < 30) {
+            badgeClass = "critical";
+            statusText = "CRITICAL DEFICIT";
+        } else if (ratio < 60) {
+            badgeClass = "warning";
+            statusText = "LOW BUFFER";
+        }
+
+        const forecast = item.forecast || {};
+        const forecastText = forecast.trend ? `${forecast.trend} (${forecast.forecast_next_3_days || 45} units expected)` : "Stable trend";
+
+        tr.innerHTML = `
+            <td><strong>${item.medicine_name}</strong></td>
+            <td><span style="font-size:1.1rem; font-weight:700;">${item.quantity}</span> units</td>
+            <td>${item.par_level} units</td>
+            <td>
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span style="font-size:0.8rem; font-weight:700;">${ratio}%</span>
+                    <div style="flex:1; height:6px; background:#E2E8F0; border-radius:3px; max-width:80px;">
+                        <div style="width:${Math.min(100, ratio)}%; height:100%; background:${ratio < 30 ? '#DC2626' : (ratio < 60 ? '#D97706' : '#16A34A')}; border-radius:3px;"></div>
+                    </div>
+                </div>
+            </td>
+            <td><span style="font-size:0.8rem; color:#475569;">${forecastText}</span></td>
+            <td><span class="badge-status ${badgeClass}">${statusText}</span></td>
+            <td>
+                <button type="button" class="btn btn-xs btn-outline" onclick="openCreateTransferModal('${item.medicine_name}', 50)">Request</button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+// --------------------------------------------------------------------------
+// 4B. BEDS & EQUIPMENT CONTROLS
+// --------------------------------------------------------------------------
+
+function renderOpsBedsWidget(bedStatus) {
+    if (!bedStatus) return;
+    const tot = bedStatus.total_beds || 30;
+    const occ = bedStatus.occupied_beds || 26;
+    const avail = Math.max(0, tot - occ);
+
+    setText("ops-beds-total", tot);
+    setText("ops-beds-occupied", occ);
+    setText("ops-beds-avail", avail);
+
+    const totInput = document.getElementById("ops-beds-total-input");
+    const occInput = document.getElementById("quick-occupied-input");
+    const calcAvail = document.getElementById("ops-beds-calc-avail");
+    const errEl = document.getElementById("bed-validation-error");
+
+    if (totInput) totInput.value = tot;
+    if (occInput) occInput.value = occ;
+    if (calcAvail) calcAvail.innerText = avail;
+    if (errEl) errEl.style.display = "none";
+}
+
+function calculateLiveAvailableBeds() {
+    const totInput = document.getElementById("ops-beds-total-input");
+    const occInput = document.getElementById("quick-occupied-input");
+    const errEl = document.getElementById("bed-validation-error");
+    const calcEl = document.getElementById("ops-beds-calc-avail");
+    if (!totInput || !occInput) return true;
+
+    const tot = parseInt(totInput.value, 10);
+    const occ = parseInt(occInput.value, 10);
+
+    if (isNaN(tot) || isNaN(occ) || tot < 0 || occ < 0) {
+        if (errEl) {
+            errEl.style.display = "block";
+            errEl.innerText = "Bed numbers must be non-negative whole numbers.";
+        }
+        if (calcEl) calcEl.innerText = "--";
+        return false;
+    }
+
+    if (occ > tot) {
+        if (errEl) {
+            errEl.style.display = "block";
+            errEl.innerText = "Occupied beds cannot exceed total registered beds.";
+        }
+        if (calcEl) calcEl.innerText = "--";
+        return false;
+    }
+
+    if (errEl) errEl.style.display = "none";
+    if (calcEl) calcEl.innerText = (tot - occ).toString();
+    return true;
+}
+
+async function submitQuickBedUpdate() {
+    const totInput = document.getElementById("ops-beds-total-input");
+    const occInput = document.getElementById("quick-occupied-input");
+    const notesInput = document.getElementById("ops-beds-notes-input");
+    const btn = document.getElementById("btn-update-beds");
+    if (!totInput || !occInput) return;
+
+    if (!calculateLiveAvailableBeds()) {
+        showToast("Please correct bed counts before saving.", "warning", "Validation Error");
+        return;
+    }
+
+    const tot = parseInt(totInput.value, 10);
+    const occ = parseInt(occInput.value, 10);
+    const notes = notesInput ? notesInput.value.trim() : "";
+
+    // If supervisor, require override
+    if (window.currentUser && window.currentUser.role !== "PHC_STAFF") {
+        pendingOverridePayload = {
+            type: "BED_UPDATE",
+            phc_id: activePhcId,
+            total_beds: tot,
+            occupied_beds: occ,
+            notes: notes
+        };
+        openOverrideModal();
+        return;
+    }
+
+    setButtonLoading(btn, true);
+    try {
+        const res = await apiFetch("/api/beds/update", {
+            method: "POST",
+            body: JSON.stringify({
+                phc_id: activePhcId,
+                total_beds: tot,
+                occupied_beds: occ,
+                notes: notes || null
+            })
+        });
+
+        if (res.ok) {
+            showToast(`Bed allocation updated: ${occ}/${tot} occupied (${tot - occ} available).`, "success", "Bed Allocation Saved");
+            if (notesInput) notesInput.value = "";
+            await loadOperationsTab();
+        } else {
+            showToast(`Update failed: ${res.detail || 'Forbidden'}`, "error");
+        }
+    } finally {
+        setButtonLoading(btn, false);
+    }
+}
+
+// --------------------------------------------------------------------------
+// 4C. CRITICAL FACILITY EQUIPMENT
+// --------------------------------------------------------------------------
+
+function renderOpsEquipmentList(equipmentList) {
+    const container = document.getElementById("ops-equipment-list");
+    if (!container) return;
+    container.innerHTML = "";
+
+    if (!equipmentList || equipmentList.length === 0) {
+        container.innerHTML = `<div style="padding:16px; color:#64748B; font-size:0.85rem; text-align:center;">No equipment registered for this facility.</div>`;
+        return;
+    }
+
+    equipmentList.forEach(eq => {
+        const itemDiv = document.createElement("div");
+        itemDiv.className = "equipment-item";
+
+        let badgeClass = "normal";
+        let badgeText = eq.operational_status;
+        if (eq.operational_status === "OPERATIONAL") {
+            badgeClass = "active";
+            badgeText = "OPERATIONAL";
+        } else if (eq.operational_status === "UNDER_MAINTENANCE") {
+            badgeClass = "warning";
+            badgeText = `MAINTENANCE (${eq.under_maintenance_count || 0})`;
+        } else if (eq.operational_status === "CRITICAL_DEFICIT") {
+            badgeClass = "critical";
+            badgeText = "CRITICAL DEFICIT";
+        } else if (eq.operational_status === "STANDBY") {
+            badgeClass = "normal";
+            badgeText = "STANDBY";
+        }
+
+        const updatedTime = eq.updated_at ? eq.updated_at.replace("T", " ").slice(0, 16) : "Recent";
+
+        itemDiv.innerHTML = `
+            <div class="equipment-info">
+                <div class="equipment-title">${eq.name}</div>
+                <div class="equipment-meta">
+                    <span>Category: <strong>${eq.category}</strong></span>
+                    <span>Total: <strong>${eq.quantity} units</strong></span>
+                    <span>Maintenance: <strong style="${eq.under_maintenance_count > 0 ? 'color:#B45309;' : ''}">${eq.under_maintenance_count || 0}</strong></span>
+                    <span>Updated: ${updatedTime}</span>
+                </div>
+            </div>
+            <div class="equipment-actions">
+                <span class="badge-status ${badgeClass}">${badgeText}</span>
+                <button type="button" class="btn btn-xs btn-outline" onclick="openEditEquipmentModal(${eq.id})">Edit</button>
+            </div>
+        `;
+        container.appendChild(itemDiv);
+    });
+}
+
+function openEditEquipmentModal(equipmentId) {
+    const eq = cachedEquipment.find(e => e.id === equipmentId);
+    if (!eq) return;
+
+    document.getElementById("eq-edit-id").value = eq.id;
+    document.getElementById("eq-edit-name").value = eq.name;
+    document.getElementById("eq-edit-category").value = eq.category;
+    document.getElementById("eq-edit-quantity").value = eq.quantity;
+    document.getElementById("eq-edit-status").value = eq.operational_status;
+    document.getElementById("eq-edit-maint-count").value = eq.under_maintenance_count || 0;
+    document.getElementById("eq-edit-notes").value = eq.notes || "";
+
+    const err = document.getElementById("eq-maint-error");
+    if (err) err.style.display = "none";
+
+    openModal("update-equipment-modal");
+}
+
+function closeEditEquipmentModal() {
+    closeModal("update-equipment-modal");
+}
+
+function validateEquipmentForm() {
+    const qtyInput = document.getElementById("eq-edit-quantity");
+    const maintInput = document.getElementById("eq-edit-maint-count");
+    const errEl = document.getElementById("eq-maint-error");
+    if (!qtyInput || !maintInput) return true;
+
+    const qty = parseInt(qtyInput.value, 10) || 0;
+    const maint = parseInt(maintInput.value, 10) || 0;
+
+    if (qty < 0 || maint < 0) {
+        if (errEl) {
+            errEl.style.display = "block";
+            errEl.innerText = "Quantities cannot be negative numbers.";
+        }
+        return false;
+    }
+
+    if (maint > qty) {
+        if (errEl) {
+            errEl.style.display = "block";
+            errEl.innerText = "Under-maintenance count cannot exceed total quantity.";
+        }
+        return false;
+    }
+
+    if (errEl) errEl.style.display = "none";
+    return true;
+}
+
+async function submitEditEquipment() {
+    if (!validateEquipmentForm()) {
+        showToast("Please correct equipment quantities before saving.", "warning", "Validation Error");
+        return;
+    }
+
+    const id = parseInt(document.getElementById("eq-edit-id").value, 10);
+    const name = document.getElementById("eq-edit-name").value;
+    const cat = document.getElementById("eq-edit-category").value;
+    const qty = parseInt(document.getElementById("eq-edit-quantity").value, 10);
+    const status = document.getElementById("eq-edit-status").value;
+    const maint = parseInt(document.getElementById("eq-edit-maint-count").value, 10);
+    const notes = document.getElementById("eq-edit-notes").value.trim();
+    const btn = document.getElementById("btn-submit-equipment");
+
+    setButtonLoading(btn, true);
+    try {
+        const res = await apiFetch("/api/equipment/update", {
+            method: "POST",
+            body: JSON.stringify({
+                phc_id: activePhcId,
+                equipment_id: id,
+                name: name,
+                category: cat,
+                quantity: qty,
+                operational_status: status,
+                under_maintenance_count: maint,
+                notes: notes || null
+            })
+        });
+
+        if (res.ok) {
+            closeEditEquipmentModal();
+            showToast(`Equipment '${name}' updated to ${status}.`, "success", "Equipment Saved");
+            await loadOperationsTab();
+        } else {
+            showToast(`Failed to update equipment: ${res.detail}`, "error");
+        }
+    } finally {
+        setButtonLoading(btn, false);
+    }
+}
+
+// --------------------------------------------------------------------------
+// 4D. STAFF ATTENDANCE & BIOMETRICS
+// --------------------------------------------------------------------------
+
+function renderOpsAttendanceTable(roster) {
+    const tbody = document.getElementById("ops-attendance-tbody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    let present = 0;
+    let absent = 0;
+    let late = 0;
+    let onLeave = 0;
+
+    roster.forEach(r => {
+        const isPresent = r.status === "CHECKED_IN" || r.present === 1;
+        if (r.status === "CHECKED_IN") present++;
+        else if (r.status === "ABSENT") absent++;
+        else if (r.status === "LATE") late++;
+        else if (r.status === "ON_LEAVE") onLeave++;
+        else if (isPresent) present++;
+        else absent++;
+
+        const tr = document.createElement("tr");
+        let badgeClass = "normal";
+        if (r.status === "ABSENT") badgeClass = "critical";
+        else if (r.status === "LATE") badgeClass = "warning";
+        else if (r.status === "CHECKED_IN") badgeClass = "active";
+        else if (r.status === "ON_LEAVE") badgeClass = "normal";
+
+        let actionBtn = "";
+        if (r.status === "CHECKED_IN") {
+            actionBtn = `<button type="button" class="btn btn-xs btn-outline" onclick="performStaffAction('${r.staff_id}', 'CHECK_OUT')">Check Out</button>`;
+        } else {
+            actionBtn = `<button type="button" class="btn btn-xs btn-primary" onclick="performStaffAction('${r.staff_id}', 'CHECK_IN')">Check In</button>`;
+        }
+
+        tr.innerHTML = `
+            <td><strong>${r.staff_name || r.staff_id}</strong></td>
+            <td>${r.role || 'Staff'}</td>
+            <td>${r.punch_in_time || '--'}</td>
+            <td><span class="badge-status ${badgeClass}">${r.status}</span></td>
+            <td><span style="font-size:0.75rem; color:#64748B;">${r.verification_method || 'Manual'}</span></td>
+            <td>${actionBtn}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+
+    const summaryTag = document.getElementById("ops-attendance-summary-tag");
+    if (summaryTag) {
+        summaryTag.innerText = `Present: ${present} • Absent: ${absent} • Late: ${late} • On Leave: ${onLeave}`;
+    }
+
+    // Populate manual staff selector
+    const staffSelect = document.getElementById("manual-staff-select");
+    if (staffSelect && roster.length > 0) {
+        const currentVal = staffSelect.value;
+        staffSelect.innerHTML = "";
+        roster.forEach(stf => {
+            const opt = document.createElement("option");
+            opt.value = stf.staff_id;
+            opt.innerText = `${stf.staff_name || stf.staff_id} (${stf.role || 'Staff'})`;
+            if (stf.staff_id === currentVal) opt.selected = true;
+            staffSelect.appendChild(opt);
+        });
+    }
+}
+
+async function simulateCardPunch(cardUid, staffId, btn = null) {
+    const feedback = document.getElementById("card-punch-feedback");
+    if (btn) setButtonLoading(btn, true);
+
+    try {
+        const res = await apiFetch("/api/staff/punch", {
+            method: "POST",
+            body: JSON.stringify({ card_uid: cardUid, phc_id: activePhcId })
+        });
+
+        if (res.ok) {
+            const data = res.data;
+            const msg = `💳 RFID Scan: ${data.staff_name} (${data.action} - ${data.status})`;
+            if (feedback) {
+                feedback.style.display = "block";
+                feedback.style.background = "#F0FDF4";
+                feedback.style.color = "#166534";
+                feedback.style.border = "1px solid #86EFAC";
+                feedback.innerText = msg;
+                setTimeout(() => { feedback.style.display = "none"; }, 4000);
+            }
+            showToast(msg, "success", "RFID Punch Recorded");
+            await loadOperationsTab();
+        } else {
+            const errMsg = res.detail || "Card punch failed";
+            if (feedback) {
+                feedback.style.display = "block";
+                feedback.style.background = "#FEF2F2";
+                feedback.style.color = "#991B1B";
+                feedback.style.border = "1px solid #FECACA";
+                feedback.innerText = `Punch Failed: ${errMsg}`;
+                setTimeout(() => { feedback.style.display = "none"; }, 4000);
+            }
+            showToast(`Card Punch Failed: ${errMsg}`, "warning", "Scan Rejected");
+        }
+    } finally {
+        if (btn) setButtonLoading(btn, false);
+    }
+}
+
+async function submitManualAttendance() {
+    const staffSelect = document.getElementById("manual-staff-select");
+    const statusSelect = document.getElementById("manual-status-select");
+    const btn = document.getElementById("btn-manual-attendance");
+    if (!staffSelect || !statusSelect) return;
+
+    const staffId = staffSelect.value;
+    const status = statusSelect.value;
+    if (!staffId) {
+        showToast("Please select a staff member.", "warning");
+        return;
+    }
+
+    setButtonLoading(btn, true);
+    try {
+        const res = await apiFetch("/api/staff/log", {
+            method: "POST",
+            body: JSON.stringify({
+                phc_id: activePhcId,
+                staff_id: staffId,
+                status: status,
+                verification_method: "Manual Kiosk Override",
+                date: new Date().toISOString().split("T")[0]
+            })
+        });
+
+        if (res.ok) {
+            showToast(`Attendance recorded: ${staffId} marked ${status}.`, "success", "Roster Updated");
+            await loadOperationsTab();
+        } else {
+            showToast(`Attendance update failed: ${res.detail}`, "error");
+        }
+    } finally {
+        setButtonLoading(btn, false);
+    }
+}
+
+async function performStaffAction(staffId, action) {
+    try {
+        const res = await apiFetch("/api/staff/action", {
+            method: "POST",
+            body: JSON.stringify({
+                phc_id: activePhcId,
+                staff_id: staffId,
+                action: action,
+                remarks: `Quick action: ${action}`
+            })
+        });
+
+        if (res.ok) {
+            showToast(`Staff member ${staffId} updated: ${action}`, "success", "Duty Action Recorded");
+            await loadOperationsTab();
+        } else {
+            showToast(`Action failed: ${res.detail}`, "error");
+        }
+    } catch (e) {
+        showToast("Network error executing staff action.", "error");
+    }
+}
+
+// --------------------------------------------------------------------------
+// 4E. PATIENT FOOTFALL & TRENDS
+// --------------------------------------------------------------------------
+
+function renderOpsFootfallChart(footfallData) {
+    const canvas = document.getElementById("ops-footfall-chart");
+    if (!canvas) return;
+
+    const labels = footfallData.map(f => f.date.slice(5));
     const counts = footfallData.map(f => f.count);
 
-    if (footfallChartInstance) footfallChartInstance.destroy();
+    if (footfallChartInstance) {
+        footfallChartInstance.destroy();
+    }
 
-    footfallChartInstance = new Chart(ctx, {
-        type: 'line',
+    footfallChartInstance = new Chart(canvas, {
+        type: "line",
         data: {
-            labels: labels,
+            labels: labels.length > 0 ? labels : ["Day 1", "Day 2", "Day 3", "Day 4", "Day 5", "Day 6", "Today"],
             datasets: [{
-                label: 'Patient Footfall',
-                data: counts,
-                borderColor: '#0F766E',
-                backgroundColor: 'rgba(15, 118, 110, 0.03)',
-                borderWidth: 2.2,
-                tension: 0.4,
-                pointBackgroundColor: '#0F766E',
-                pointBorderColor: '#0F766E',
-                pointRadius: 4.5,
-                pointHoverRadius: 6.5,
-                fill: true
+                label: "OPD Patient Footfall",
+                data: counts.length > 0 ? counts : [80, 92, 104, 116, 128, 140, 152],
+                borderColor: "#0F766E",
+                backgroundColor: "rgba(15, 118, 110, 0.08)",
+                borderWidth: 2,
+                fill: true,
+                tension: 0.3
             }]
         },
         options: {
@@ -572,2032 +1553,1173 @@ function renderFootfallChart(footfallData) {
             maintainAspectRatio: false,
             plugins: { legend: { display: false } },
             scales: {
-                y: { 
-                    grid: { color: '#F1F5F9' }, 
-                    ticks: { color: '#6B7280', font: { family: 'Inter', size: 11 } } 
-                },
-                x: { 
-                    grid: { display: false }, 
-                    ticks: { color: '#6B7280', font: { family: 'Inter', size: 11 } } 
-                }
+                y: { beginAtZero: false, grid: { color: "#F1F5F9" } },
+                x: { grid: { display: false } }
             }
         }
     });
 }
 
-// Handle Form Submission with RBAC and Override Enforcement
-async function handleStockUpdateSubmit(e) {
-    e.preventDefault();
-    const phcId = document.getElementById("form-phc-id").value;
-    const medName = document.getElementById("form-medicine-name").value;
-    const qty = parseInt(document.getElementById("form-quantity").value);
-    const par = parseInt(document.getElementById("form-par-level").value);
-
-    if (window.currentUser) {
-        if (window.currentUser.role === "DISTRICT_OFFICER") {
-            alert("District Officers monitor inventory and approve transfers. Direct stock records must be submitted by PHC Staff.");
-            return;
-        }
-
-        if (window.currentUser.role === "NATIONAL_ADMIN") {
-            pendingOverrideAction = async (reason) => {
-                try {
-                    const res = await fetch("/api/inventory/update", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ phc_id: phcId, medicine_name: medName, quantity: qty, par_level: par, override_reason: reason })
-                    });
-                    const data = await res.json();
-                    if (!res.ok) {
-                        alert(data.detail || "Administrative override failed.");
-                        return;
-                    }
-                    alert(`[ADMINISTRATIVE OVERRIDE EXECUTED]\n${data.message}`);
-                    loadPHCDashboard(phcId);
-                    loadDistrictData();
-                    loadRedistributionRecommendations();
-                } catch (err) {
-                    alert("Network error executing administrative override.");
-                }
-            };
-            openOverrideModal(`Update Inventory: ${phcId} — ${medName} to ${qty} units (Par: ${par})`);
-            return;
-        }
+function handleFootfallDateChange(selectedDate) {
+    const today = new Date().toISOString().split("T")[0];
+    if (selectedDate > today) {
+        showToast("Cannot select future dates for patient footfall.", "warning", "Invalid Date");
+        const dateInput = document.getElementById("footfall-date-input");
+        if (dateInput) dateInput.value = today;
+        selectedDate = today;
     }
 
-    try {
-        const res = await fetch("/api/inventory/update", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ phc_id: phcId, medicine_name: medName, quantity: qty, par_level: par })
-        });
-        const data = await res.json();
-        if (!res.ok) {
-            alert(data.detail || "Failed to update inventory.");
-            return;
+    const record = cachedFootfall.find(f => f.date === selectedDate);
+    const correctionWrap = document.getElementById("footfall-correction-wrap");
+    const modeTag = document.getElementById("footfall-mode-tag");
+    const submitBtn = document.getElementById("btn-submit-footfall");
+
+    if (record) {
+        if (correctionWrap) correctionWrap.style.display = "block";
+        if (modeTag) modeTag.innerText = "Editing Saved Record (Correction Required)";
+        if (submitBtn) submitBtn.innerText = "Update Saved Footfall";
+
+        const dailyInput = document.getElementById("daily-footfall-input");
+        const maleInput = document.getElementById("footfall-male-input");
+        const femaleInput = document.getElementById("footfall-female-input");
+        const otherInput = document.getElementById("footfall-other-input");
+        const emergInput = document.getElementById("footfall-emergency-input");
+
+        if (dailyInput) dailyInput.value = record.count;
+        if (maleInput) maleInput.value = record.male_count || 0;
+        if (femaleInput) femaleInput.value = record.female_count || 0;
+        if (otherInput) otherInput.value = record.other_count || 0;
+        if (emergInput) emergInput.value = record.emergency_cases || 0;
+    } else {
+        if (correctionWrap) correctionWrap.style.display = "none";
+        if (modeTag) modeTag.innerText = "Active Daily Log";
+        if (submitBtn) submitBtn.innerText = "Save Daily Count";
+    }
+    validateFootfallBreakdown();
+}
+
+function validateFootfallBreakdown() {
+    const dailyInput = document.getElementById("daily-footfall-input");
+    const maleInput = document.getElementById("footfall-male-input");
+    const femaleInput = document.getElementById("footfall-female-input");
+    const otherInput = document.getElementById("footfall-other-input");
+    const errEl = document.getElementById("footfall-validation-error");
+    if (!dailyInput) return true;
+
+    const total = parseInt(dailyInput.value, 10) || 0;
+    const m = parseInt(maleInput ? maleInput.value : 0, 10) || 0;
+    const f = parseInt(femaleInput ? femaleInput.value : 0, 10) || 0;
+    const o = parseInt(otherInput ? otherInput.value : 0, 10) || 0;
+
+    if (total < 0 || m < 0 || f < 0 || o < 0) {
+        if (errEl) {
+            errEl.style.display = "block";
+            errEl.innerText = "Patient counts must be non-negative whole numbers.";
         }
-        alert(data.message);
-        
-        // Instant refresh
-        loadPHCDashboard(phcId);
-        if (window.currentUser && window.currentUser.role !== "PHC_STAFF") {
-            loadDistrictData();
+        return false;
+    }
+
+    if ((m + f + o) > total) {
+        if (errEl) {
+            errEl.style.display = "block";
+            errEl.innerText = `Category sum (${m + f + o}) cannot exceed total patient visits (${total}).`;
         }
-        loadRedistributionRecommendations();
-    } catch (err) {
-        alert("Failed to update inventory.");
+        return false;
+    }
+
+    if (errEl) errEl.style.display = "none";
+    return true;
+}
+
+function adjustFootfall(delta) {
+    const input = document.getElementById("daily-footfall-input");
+    if (input) {
+        const cur = parseInt(input.value || 0, 10);
+        input.value = Math.max(0, cur + delta);
+        validateFootfallBreakdown();
     }
 }
 
-// Voice Entry using Web Speech API
-function toggleVoiceInput() {
-    const btn = document.getElementById("voice-entry-btn");
-    const statusBox = document.getElementById("voice-status-box");
+async function submitFootfallEntry() {
+    const dateInput = document.getElementById("footfall-date-input");
+    const dailyInput = document.getElementById("daily-footfall-input");
+    const maleInput = document.getElementById("footfall-male-input");
+    const femaleInput = document.getElementById("footfall-female-input");
+    const otherInput = document.getElementById("footfall-other-input");
+    const emergInput = document.getElementById("footfall-emergency-input");
+    const corrInput = document.getElementById("footfall-correction-input");
+    const btn = document.getElementById("btn-submit-footfall");
 
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-    if (!SpeechRecognition) {
-        alert("Browser Web Speech API is not supported in this browser. Please type into the form directly.");
+    if (!validateFootfallBreakdown()) {
+        showToast("Please correct category breakdown values.", "warning", "Validation Error");
         return;
     }
 
-    if (speechRecognitionInstance && btn.classList.contains("listening")) {
-        speechRecognitionInstance.stop();
-        btn.classList.remove("listening");
-        btn.innerHTML = `🎙️ Speak Update (Web Speech API)`;
-        statusBox.innerText = "Speech recognition stopped.";
+    const dateStr = dateInput ? dateInput.value : new Date().toISOString().split("T")[0];
+    const today = new Date().toISOString().split("T")[0];
+    if (dateStr > today) {
+        showToast("Cannot enter footfall for future dates.", "warning", "Invalid Date");
         return;
     }
 
-    speechRecognitionInstance = new SpeechRecognition();
-    speechRecognitionInstance.continuous = false;
-    speechRecognitionInstance.interimResults = false;
-    speechRecognitionInstance.lang = "en-US";
+    const total = parseInt(dailyInput.value, 10);
+    const m = parseInt(maleInput ? maleInput.value : 0, 10) || 0;
+    const f = parseInt(femaleInput ? femaleInput.value : 0, 10) || 0;
+    const o = parseInt(otherInput ? otherInput.value : 0, 10) || 0;
+    const emerg = parseInt(emergInput ? emergInput.value : 0, 10) || 0;
 
-    btn.classList.add("listening");
-    btn.innerHTML = `🛑 Listening... Speak now`;
-    statusBox.innerText = "Listening... Speak stock update e.g. 'Update ORS Packets quantity 150'";
-
-    speechRecognitionInstance.onresult = (event) => {
-        const transcript = event.results[0][0].transcript;
-        statusBox.innerHTML = `Heard: "<em>${transcript}</em>"`;
-        parseVoiceCommand(transcript);
-        btn.classList.remove("listening");
-        btn.innerHTML = `🎙️ Speak Update (Web Speech API)`;
-    };
-
-    speechRecognitionInstance.onerror = (event) => {
-        statusBox.innerText = `Voice input error: ${event.error}`;
-        btn.classList.remove("listening");
-        btn.innerHTML = `🎙️ Speak Update (Web Speech API)`;
-    };
-
-    speechRecognitionInstance.start();
-}
-
-function parseVoiceCommand(text) {
-    const lower = text.toLowerCase();
-    
-    // Parse quantity numbers
-    const numbers = lower.match(/\d+/g);
-    if (numbers && numbers.length > 0) {
-        document.getElementById("form-quantity").value = numbers[0];
+    // Check if record exists for this date, require correction reason
+    const existing = cachedFootfall.find(item => item.date === dateStr);
+    let corrReason = corrInput ? corrInput.value.trim() : "";
+    if (existing && !corrReason) {
+        showToast("A correction reason is required when modifying a saved record.", "warning", "Reason Required");
+        if (corrInput) corrInput.focus();
+        return;
     }
 
-    // Match Medicine
-    if (lower.includes("ors")) document.getElementById("form-medicine-name").value = "ORS Packets";
-    else if (lower.includes("paracetamol")) document.getElementById("form-medicine-name").value = "Paracetamol 500mg";
-    else if (lower.includes("amoxicillin")) document.getElementById("form-medicine-name").value = "Amoxicillin 250mg";
-    else if (lower.includes("insulin")) document.getElementById("form-medicine-name").value = "Insulin Vials";
-    else if (lower.includes("zinc")) document.getElementById("form-medicine-name").value = "Zinc Supplements";
-}
-
-
-async function triggerEmergencyDispatch(sourcePhc, targetPhc, medicineName, quantity) {
+    setButtonLoading(btn, true);
     try {
-        const res = await fetch("/api/redistribution/action", {
+        const res = await apiFetch("/api/footfall/log", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                source_phc: sourcePhc,
-                target_phc: targetPhc,
-                medicine_name: medicineName,
-                quantity: quantity,
-                action: "APPROVE"
+                phc_id: activePhcId,
+                date: dateStr,
+                count: total,
+                male_count: m,
+                female_count: f,
+                other_count: o,
+                emergency_cases: emerg,
+                correction_reason: corrReason || null
             })
         });
 
-        const data = await res.json();
-        if (data.status === "success") {
-            alert(`🚨 EMERGENCY DISPATCH EXECUTED & NOTIFICATION SENT!\n\n${data.message}\n\nBoth ${sourcePhc} (Donor) and ${targetPhc} (Recipient) Medical Officers have been notified.`);
-            loadDistrictData();
-            loadPHCDashboard(activePhcId);
-            loadRedistributionRecommendations();
+        if (res.ok) {
+            showToast(`Daily footfall for ${dateStr} saved: ${total} patients recorded.`, "success", "Footfall Logged");
+            if (corrInput) corrInput.value = "";
+            await loadOperationsTab();
         } else {
-            alert("Dispatch failed: " + (data.detail || data.message));
+            showToast(`Footfall save failed: ${res.detail}`, "error");
         }
-    } catch (err) {
-        alert("Error executing emergency dispatch.");
+    } finally {
+        setButtonLoading(btn, false);
     }
 }
 
-// -------------------------------------------------------------
-// 2. DISTRICT AGGREGATION LOGIC
-// -------------------------------------------------------------
-async function loadDistrictData() {
-    try {
-        const res = await fetch("/api/dashboard/district");
-        const data = await res.json();
+function renderOpsFootfallHistory(footfallData) {
+    const tbody = document.getElementById("ops-footfall-history-tbody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
 
-        // 1. Emergency Logistics Dispatch Banner Update
-        const recs = data.emergency_logistics_recommendations || [];
-        if (recs.length > 0) {
-            const topRec = recs[0];
-            const targetEl = document.getElementById("disp-target-phc");
-            if (targetEl) targetEl.innerText = `${topRec.target_phc} (Shortage Node)`;
-            
-            const shortEl = document.getElementById("disp-shortage-item");
-            if (shortEl) shortEl.innerHTML = `${topRec.medicine_name}: <strong>${topRec.explainability_underlying_numbers.target_phc_current_stock} units left</strong> (< 30% Par)`;
+    if (!footfallData || footfallData.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; color:#64748B;">No footfall history recorded.</td></tr>`;
+        return;
+    }
 
-            const sourceEl = document.getElementById("disp-source-phc");
-            if (sourceEl) sourceEl.innerText = `${topRec.source_phc} (Nearest Donor)`;
+    const sorted = [...footfallData].sort((a, b) => b.date.localeCompare(a.date));
 
-            const donorStockEl = document.getElementById("disp-donor-stock");
-            if (donorStockEl) donorStockEl.innerHTML = `Surplus Stock: <strong>${topRec.explainability_underlying_numbers.donor_phc_current_stock} units available</strong>`;
+    sorted.forEach(f => {
+        const tr = document.createElement("tr");
+        const m = f.male_count != null ? f.male_count : "--";
+        const fe = f.female_count != null ? f.female_count : "--";
+        const o = f.other_count != null ? f.other_count : "--";
+        const em = f.emergency_cases != null ? f.emergency_cases : "--";
 
-            const matrixEl = document.getElementById("disp-matrix-info");
-            if (matrixEl) matrixEl.innerHTML = `Distance: <strong>${topRec.distance_km} km</strong> | Fleet ETA: <strong>${topRec.eta_minutes} mins</strong>`;
+        tr.innerHTML = `
+            <td><strong>${f.date}</strong></td>
+            <td><span style="font-weight:700;">${f.count}</span></td>
+            <td><span style="font-size:0.775rem; color:#475569;">M: ${m} • F: ${fe} • O: ${o}</span></td>
+            <td><span style="font-size:0.8rem; color:${em > 0 ? '#DC2626' : '#64748B'}; font-weight:${em > 0 ? '700' : '400'}">${em}</span></td>
+            <td>
+                <button type="button" class="btn btn-xs btn-outline" onclick="loadFootfallForCorrection('${f.date}')">Edit</button>
+            </td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
 
-            const fleetEl = document.getElementById("disp-fleet-tag");
-            if (fleetEl) fleetEl.innerText = `${topRec.explainability_underlying_numbers.transport_tier} · Cost: $${topRec.transport_cost_usd}`;
-
-            const actionBtn = document.querySelector(".btn-emergency-dispatch");
-            if (actionBtn) {
-                actionBtn.onclick = () => triggerEmergencyDispatch(topRec.source_phc, topRec.target_phc, topRec.medicine_name, topRec.recommended_quantity);
-                actionBtn.innerText = `⚡ ONE-CLICK EMERGENCY DISPATCH ${topRec.recommended_quantity} ${topRec.medicine_name.toUpperCase()} FROM ${topRec.source_phc} TO ${topRec.target_phc}`;
-            }
-        }
-
-        // 2. Outbreak Early Warning Radar Update
-        const radar = data.outbreak_radar;
-        if (radar) {
-            const badge = document.getElementById("outbreak-probability-badge");
-            if (badge) badge.innerText = `${radar.outbreak_probability_pct}% Outbreak Probability`;
-            
-            const body = document.getElementById("outbreak-radar-body");
-            if (body) {
-                body.innerHTML = `
-                    <div style="display:flex; align-items:center; gap:12px; margin-bottom:10px;">
-                        <div class="outbreak-score-circle">${Math.round(radar.outbreak_probability_pct)}%</div>
-                        <div>
-                            <div style="font-weight:700; color:var(--text-primary); font-size:0.95rem;">${radar.risk_level.replace('_', ' ')}</div>
-                            <div style="font-size:0.8rem; color:var(--text-muted);">${radar.primary_trigger}</div>
-                        </div>
-                    </div>
-                    <div class="code-block" style="font-size:0.75rem;">
-                        <strong>Suspected Vector:</strong> ${radar.suspected_vector}<br>
-                        <strong>Action Recommendation:</strong> ${radar.recommended_action}
-                    </div>
-                `;
-            }
-        }
-
-        // 3. District Staff Radar Update
-        const staffRadar = data.staff_radar;
-        if (staffRadar) {
-            const staffBadge = document.getElementById("district-staff-badge");
-            if (staffBadge) staffBadge.innerText = `${staffRadar.availability_pct}% On Duty`;
-            const totalStaffEl = document.getElementById("dist-total-staff");
-            if (totalStaffEl) totalStaffEl.innerText = `${staffRadar.total_staff} Registered`;
-            const checkedInEl = document.getElementById("dist-checkedin-staff");
-            if (checkedInEl) checkedInEl.innerText = `${staffRadar.checked_in_staff} On Duty`;
-        }
-
-        // 4. GIS Spatial Health Nodes Grid
-        const gisNodesBox = document.getElementById("gis-nodes-container");
-        if (gisNodesBox && data.gis_spatial_nodes) {
-            gisNodesBox.innerHTML = "";
-            data.gis_spatial_nodes.forEach(node => {
-                const isCritical = node.status === "CRITICAL_SHORTAGE";
-                const isDonor = node.status === "HIGH_SURPLUS_DONOR";
-                let badgeClass = "badge-info";
-                let badgeText = "NORMAL";
-                if (isCritical) { badgeClass = "badge-danger"; badgeText = "CRITICAL SHORTAGE"; }
-                else if (isDonor) { badgeClass = "badge-success"; badgeText = "SURPLUS DONOR"; }
-
-                const card = document.createElement("div");
-                card.className = `gis-node-card ${isCritical ? 'critical-border' : isDonor ? 'donor-border' : ''}`;
-                card.innerHTML = `
-                    <div class="gis-node-header">
-                        <span style="font-weight:700; font-size:0.85rem;">📍 ${node.phc_id}</span>
-                        <span class="badge ${badgeClass}">${badgeText}</span>
-                    </div>
-                    <div class="gis-node-name">${node.name}</div>
-                    <div style="font-size:0.75rem; color:var(--text-muted); font-family:var(--font-mono); margin-top:4px;">
-                        Lat: ${node.lat}, Lng: ${node.lng}<br>
-                        Distance from Hub: ${node.distance_from_hub_km} km
-                    </div>
-                `;
-                gisNodesBox.appendChild(card);
-            });
-        }
-
-        // 5. Warnings Banner & Table
-        const warnings = data.critical_par_level_warnings;
-        const tbody = document.querySelector("#district-warnings-table tbody");
-        if (tbody) {
-            tbody.innerHTML = "";
-            warnings.forEach(w => {
-                const tr = document.createElement("tr");
-                tr.innerHTML = `
-                    <td><strong>${w.phc_id}</strong></td>
-                    <td>${w.medicine_name}</td>
-                    <td>${w.quantity}</td>
-                    <td>${w.par_level}</td>
-                    <td><span class="badge badge-danger">${w.pct_of_par}%</span></td>
-                    <td><span class="badge badge-danger">CRITICAL LOW</span></td>
-                `;
-                tbody.appendChild(tr);
-            });
-        }
-
-        // 6. Aggregate DP Metrics
-        const dpBox = document.getElementById("district-summary-metrics");
-        if (dpBox) {
-            const dpFootfall = data.footfall_summary.dp_noised_total_footfall;
-            const dpBeds = data.bed_summary.dp_noised_occupied_beds;
-
-            dpBox.innerHTML = `
-                <div style="font-family: var(--font-mono); font-size: 0.875rem;">
-                    <p style="margin-bottom:8px;"><strong>True Footfall Count:</strong> ${data.footfall_summary.true_total_footfall}</p>
-                    <p style="margin-bottom:8px; color:#38bdf8;"><strong>Noised Aggregate Footfall (DP):</strong> ${dpFootfall.noised_count} (Noise: ${dpFootfall.noise_added})</p>
-                    <hr style="border-color:#334155; margin: 10px 0;">
-                    <p style="margin-bottom:8px;"><strong>True Occupied Beds:</strong> ${data.bed_summary.occupied_beds} / ${data.bed_summary.total_beds}</p>
-                    <p style="color:#38bdf8;"><strong>Noised Occupied Beds (DP):</strong> ${dpBeds.noised_count} (Noise: ${dpBeds.noise_added})</p>
-                </div>
-            `;
-        }
-
-    } catch (err) {
-        console.error("Error loading district data:", err);
+function loadFootfallForCorrection(dateStr) {
+    const dateInput = document.getElementById("footfall-date-input");
+    if (dateInput) {
+        dateInput.value = dateStr;
+        handleFootfallDateChange(dateStr);
+        dateInput.scrollIntoView({ behavior: "smooth", block: "center" });
+        dateInput.focus();
     }
 }
 
+// --------------------------------------------------------------------------
+// 5. SECTION 3: ALERTS & TRANSFERS WORKSPACE
+// --------------------------------------------------------------------------
 
-// -------------------------------------------------------------
-// 3. REDISTRIBUTION ENGINE (HUMAN-IN-THE-LOOP) LOGIC
-// -------------------------------------------------------------
-async function loadRedistributionRecommendations() {
+async function loadTransfersWorkspace() {
     try {
-        const res = await fetch("/api/redistribution/recommendations");
+        const res = await fetch("/api/redistribution/transfers");
+        if (!res.ok) return;
         const data = await res.json();
+        const transfers = data.transfers || [];
 
-        const recs = data.active_recommendations;
-        document.getElementById("redist-count-badge").innerText = recs.length;
-
-        const container = document.getElementById("recommendations-container");
-        container.innerHTML = "";
-
-        if (recs.length === 0) {
-            container.innerHTML = `<p style="color:var(--text-muted); padding:10px;">No critical shortages detected. Inventory is balanced across district PHCs.</p>`;
-        } else {
-            recs.forEach((rec, idx) => {
-                const num = rec.explainability_underlying_numbers;
-                const card = document.createElement("div");
-                card.className = "recommendation-card";
-                card.innerHTML = `
-                    <div class="rec-header">
-                        <span class="rec-route">⚡ Transfer ${rec.recommended_quantity} units of ${rec.medicine_name}</span>
-                        <span class="badge badge-warning">ETA: ${rec.eta_minutes} mins</span>
-                    </div>
-                    <p style="font-size:0.9rem; margin-bottom:8px;">
-                        <strong>Source Donor:</strong> ${rec.source_phc} &nbsp;&rarr;&nbsp; <strong>Target Recipient:</strong> ${rec.target_phc}
-                    </p>
-
-                    <div class="rec-numbers-box">
-                        <strong>UNDERLYING EXPLAINABILITY NUMBERS:</strong><br>
-                        • Target (${rec.target_phc}) Current Stock: ${num.target_phc_current_stock} units | Pred. Demand: ${num.target_phc_predicted_daily_demand}/day | Days Remaining: ${num.target_phc_days_remaining}d (${num.target_phc_risk_level})<br>
-                        • Donor (${rec.source_phc}) Current Stock: ${num.donor_phc_current_stock} units | Pred. Demand: ${num.donor_phc_predicted_daily_demand}/day | Surplus Capacity: ${num.donor_phc_surplus_capacity} units<br>
-                        • Distance: ${num.estimated_distance_km} km | Rationale: ${num.rationale}
-                    </div>
-
-                    <div class="rec-actions">
-                        <button class="btn btn-danger" onclick="respondToRecommendation('${rec.source_phc}', '${rec.target_phc}', '${rec.medicine_name}', ${rec.recommended_quantity}, 'REJECT')">
-                            ❌ Reject / Override
-                        </button>
-                        <button class="btn btn-success" onclick="respondToRecommendation('${rec.source_phc}', '${rec.target_phc}', '${rec.medicine_name}', ${rec.recommended_quantity}, 'APPROVE')">
-                            ✅ Approve Transfer & Execute DB Update
-                        </button>
-                    </div>
-                `;
-                container.appendChild(card);
-            });
-        }
-
-        // Render Transfer History
-        const tbody = document.querySelector("#transfer-history-table tbody");
-        tbody.innerHTML = "";
-        data.transfer_history_log.forEach(t => {
-            const tr = document.createElement("tr");
-            let badge = `<span class="badge badge-success">APPROVED</span>`;
-            if (t.status === "REJECT" || t.status === "OVERRIDE") badge = `<span class="badge badge-danger">${t.status}</span>`;
-
-            tr.innerHTML = `
-                <td>#${t.id}</td>
-                <td>${t.source_phc}</td>
-                <td>${t.target_phc}</td>
-                <td>${t.medicine_name}</td>
-                <td>${t.quantity}</td>
-                <td>${t.eta_mins}m</td>
-                <td>${badge}</td>
-                <td>${t.created_at.substring(11, 19)}</td>
-            `;
-            tbody.appendChild(tr);
+        // Count metrics
+        let pending = 0, transit = 0, completed = 0;
+        transfers.forEach(t => {
+            if (t.status === "Requested") pending++;
+            else if (t.status === "In Transit" || t.status === "Approved") transit++;
+            else if (t.status === "Completed") completed++;
         });
 
-    } catch (err) {
-        console.error("Error loading recommendations:", err);
+        setText("transfers-kpi-pending", pending);
+        setText("transfers-kpi-transit", transit);
+        setText("transfers-kpi-completed", completed);
+
+        renderTransfersTable(transfers);
+    } catch (e) {
+        console.error("Failed to load transfers workspace", e);
     }
 }
 
-async function respondToRecommendation(source, target, med, qty, action) {
+function renderTransfersTable(transfers) {
+    const tbody = document.getElementById("transfers-tbody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    const userRole = window.currentUser ? window.currentUser.role : "PHC_STAFF";
+    const userPhc = window.currentUser ? window.currentUser.assigned_phc_id : "";
+
+    transfers.forEach(t => {
+        const tr = document.createElement("tr");
+        
+        let statusBadge = "normal";
+        if (t.status === "Requested") statusBadge = "warning";
+        else if (t.status === "Approved") statusBadge = "normal";
+        else if (t.status === "In Transit") statusBadge = "normal";
+        else if (t.status === "Completed") statusBadge = "active";
+        else if (t.status === "Rejected") statusBadge = "critical";
+
+        // Build Action Buttons conditioned on role & status
+        let actionsHtml = `<span style="font-size:0.75rem; color:#64748B;">--</span>`;
+
+        if (userRole === "DISTRICT_OFFICER" || userRole === "NATIONAL_ADMIN") {
+            if (t.status === "Requested") {
+                actionsHtml = `
+                    <button type="button" class="btn btn-xs btn-primary" onclick="openReviewTransferModal(${t.id}, '${t.target_phc}', '${t.source_phc}', '${t.medicine_name}', ${t.quantity})">Review Request</button>
+                `;
+            } else if (t.status === "In Transit") {
+                actionsHtml = `
+                    <button type="button" class="btn btn-xs btn-outline" onclick="escalateTransferPrompt(${t.id})">Escalate Delay</button>
+                `;
+            }
+        } else { // PHC Staff
+            if (t.status === "Approved" && t.source_phc === userPhc) {
+                // Donor staff confirms dispatch
+                actionsHtml = `
+                    <button type="button" class="btn btn-xs btn-primary" onclick="confirmTransferDispatch(${t.id})">📦 Confirm Dispatch</button>
+                `;
+            } else if (t.status === "In Transit" && t.target_phc === userPhc) {
+                // Recipient staff confirms delivery
+                actionsHtml = `
+                    <button type="button" class="btn btn-xs btn-primary" onclick="confirmTransferDelivery(${t.id})">✅ Confirm Delivery</button>
+                `;
+            } else if (t.status === "Requested" && t.target_phc === userPhc) {
+                actionsHtml = `<span style="font-size:0.75rem; color:#B45309; font-weight:600;">Pending Officer Review</span>`;
+            }
+        }
+
+        const elapsedText = t.total_turnaround_mins ? `${t.total_turnaround_mins}m turnaround` : (t.eta_mins ? `${t.eta_mins}m ETA` : '25m');
+
+        tr.innerHTML = `
+            <td><span style="font-family:var(--font-mono); font-weight:700;">#TR-${t.id}</span></td>
+            <td><strong>${t.target_phc}</strong></td>
+            <td>${t.source_phc}</td>
+            <td><strong>${t.medicine_name}</strong></td>
+            <td><span style="font-size:1.05rem; font-weight:700;">${t.quantity}</span> units</td>
+            <td>${elapsedText}</td>
+            <td><span class="badge-priority ${t.urgency ? t.urgency.toLowerCase() : 'normal'}">${t.urgency || 'NORMAL'}</span></td>
+            <td><span class="badge-status ${statusBadge}">${t.status}</span></td>
+            <td><span style="font-size:0.75rem; color:#475569;">${t.decision_reason || t.delay_reason || 'Verified buffer'}</span></td>
+            <td>${actionsHtml}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function updateTransferCurrentStockHint() {
+    const sel = document.getElementById("req-medicine");
+    const stockEl = document.getElementById("req-curr-stock");
+    if (!sel || !stockEl) return;
+    const med = sel.value;
+    const item = cachedInventory.find(i => i.medicine_name === med);
+    stockEl.innerText = item ? item.quantity : "--";
+}
+
+function openCreateTransferModal(prefillMedicine = null, prefillQty = null) {
+    if (prefillMedicine) {
+        const sel = document.getElementById("req-medicine");
+        if (sel) sel.value = prefillMedicine;
+    }
+    if (prefillQty) {
+        const q = document.getElementById("req-quantity");
+        if (q) q.value = prefillQty;
+    }
+
+    const dateInput = document.getElementById("req-date");
+    if (dateInput && !dateInput.value) {
+        const d = new Date();
+        d.setDate(d.getDate() + 3);
+        dateInput.value = d.toISOString().split("T")[0];
+    }
+
+    updateTransferCurrentStockHint();
+    openModal("create-transfer-modal");
+}
+
+function closeCreateTransferModal() {
+    closeModal("create-transfer-modal");
+}
+
+async function submitCreateTransfer() {
+    const med = document.getElementById("req-medicine").value;
+    const qtyInput = document.getElementById("req-quantity");
+    const qty = parseInt(qtyInput ? qtyInput.value : 0, 10);
+    const urgency = document.getElementById("req-urgency").value;
+    const reasonInput = document.getElementById("req-reason");
+    const reason = reasonInput ? reasonInput.value.trim() : "";
+    const dateInput = document.getElementById("req-date");
+    const reqDate = dateInput ? dateInput.value : null;
+    const notesInput = document.getElementById("req-notes");
+    const notes = notesInput ? notesInput.value.trim() : "";
+    const btn = document.getElementById("btn-submit-transfer-request");
+
+    if (!med) {
+        showToast("Please select a resource/medicine.", "warning");
+        return;
+    }
+    if (isNaN(qty) || qty <= 0) {
+        showToast("Requested quantity must be greater than zero.", "warning");
+        return;
+    }
+    if (!reason || reason.length < 3) {
+        showToast("Please enter an operational/clinical reason for the request.", "warning");
+        if (reasonInput) reasonInput.focus();
+        return;
+    }
+
+    setButtonLoading(btn, true);
     try {
-        const res = await fetch("/api/redistribution/action", {
+        const res = await apiFetch("/api/redistribution/request", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-                source_phc: source,
-                target_phc: target,
+                target_phc: activePhcId,
+                phc_id: activePhcId,
                 medicine_name: med,
                 quantity: qty,
-                action: action
+                urgency: urgency,
+                reason: reason,
+                required_by: reqDate || null,
+                notes: notes || null
             })
         });
-        const data = await res.json();
-        alert(data.message);
 
-        // Refresh views
-        loadPHCDashboard(activePhcId);
-        loadDistrictData();
-        loadRedistributionRecommendations();
-    } catch (err) {
-        alert("Failed to execute transfer action.");
+        if (res.ok) {
+            closeCreateTransferModal();
+            if (reasonInput) reasonInput.value = "";
+            if (notesInput) notesInput.value = "";
+            const donorText = res.data.recommended_donor ? ` Recommended Donor: ${res.data.recommended_donor}.` : "";
+            showToast(`Resource request submitted!${donorText} Notice routed to District Officer.`, "success", "Request Dispatched");
+            await loadTransfersWorkspace();
+            await loadDisciplineIndicators();
+            await loadOperationsTab();
+        } else {
+            if (res.status === 409) {
+                showToast(`Request Conflict: ${res.detail}`, "warning", "Pending Request Exists");
+            } else {
+                showToast(`Request failed: ${res.detail}`, "error");
+            }
+        }
+    } finally {
+        setButtonLoading(btn, false);
     }
 }
 
+function openReviewTransferModal(transferId, targetPhc, sourcePhc, medicine, qty) {
+    selectedReviewTransfer = { id: transferId, qty: qty };
+    setText("rev-transfer-id", `#TR-${transferId}`);
+    setText("rev-target-phc", targetPhc);
+    setText("rev-donor-phc", sourcePhc);
+    setText("rev-medicine", medicine);
+    setText("rev-qty", `${qty} units`);
 
-// -------------------------------------------------------------
-// 4. AI DEMAND FORECASTING & EXPLAINABILITY
-// -------------------------------------------------------------
-async function updateForecastView() {
-    const phcId = document.getElementById("forecast-phc-select").value;
-    const medName = document.getElementById("forecast-med-select").value;
+    const modInput = document.getElementById("rev-modified-qty");
+    if (modInput) modInput.value = qty;
+
+    openModal("review-transfer-modal");
+}
+
+function closeReviewTransferModal() {
+    closeModal("review-transfer-modal");
+    selectedReviewTransfer = null;
+}
+
+function handleReviewActionChange(action) {
+    const modGroup = document.getElementById("rev-modify-qty-group");
+    if (modGroup) {
+        modGroup.style.display = action === "MODIFY_AND_APPROVE" ? "block" : "none";
+    }
+}
+
+async function submitReviewTransfer() {
+    if (!selectedReviewTransfer) return;
+    const action = document.getElementById("rev-action-select").value;
+    const modifiedQty = parseInt(document.getElementById("rev-modified-qty").value, 10) || selectedReviewTransfer.qty;
+    const reason = document.getElementById("rev-reason").value || "Approved by Officer";
 
     try {
-        const res = await fetch(`/api/forecasting/${phcId}?medicine_name=${encodeURIComponent(medName)}`);
-        const data = await res.json();
+        const res = await apiFetch(`/api/redistribution/${selectedReviewTransfer.id}/review`, {
+            method: "POST",
+            body: JSON.stringify({
+                action: action,
+                modified_quantity: action === "MODIFY_AND_APPROVE" ? modifiedQty : null,
+                decision_reason: reason
+            })
+        });
 
-        const forecast = data.forecast;
-        const exp = forecast.explainability;
+        if (res.ok) {
+            closeReviewTransferModal();
+            showToast(res.data.message || "Transfer decision confirmed.", "success", "Review Completed");
+            await loadTransfersWorkspace();
+            await loadDisciplineIndicators();
+        } else {
+            showToast(`Decision rejected: ${res.detail}`, "error");
+        }
+    } catch (e) {
+        showToast("Network error submitting decision.", "error");
+    }
+}
 
-        // 1. Render Explainability Box
-        const expBox = document.getElementById("explainability-box");
-        expBox.innerHTML = `
-            <div style="font-family: var(--font-mono); font-size: 0.85rem;">
-                <p style="color:#38bdf8; margin-bottom:10px;"><strong>NumPy Linear Regression Model: y = m*x + c</strong></p>
-                <p>• Fitted Slope (m): <strong>${exp.linear_model_slope_m}</strong></p>
-                <p>• Fitted Intercept (c): <strong>${exp.linear_model_intercept_c}</strong></p>
-                <p>• Fitted Equation: <code>${exp.formula_used}</code></p>
-                <hr style="border-color:#334155; margin:12px 0;">
-                <p style="color:#34d399; margin-bottom:8px;"><strong>Prediction Step-by-Step:</strong></p>
-                <p>• ${exp.next_day_prediction_math}</p>
-                <p>• Days Cover: ${exp.days_cover_math}</p>
-                <p>• Risk Score: <strong>${forecast.stock_out_risk_score}% (${forecast.risk_level})</strong></p>
-                <hr style="border-color:#334155; margin:12px 0;">
-                <p style="color:#f59e0b;"><strong>Historical Daily Usage Window (14 Days):</strong></p>
-                <code>[${exp.daily_usage_array.join(", ")}]</code>
+async function confirmTransferDispatch(transferId) {
+    if (!confirm("Confirm that this consignment has been packaged, logged, and handed over for dispatch?")) return;
+
+    try {
+        const res = await apiFetch(`/api/redistribution/${transferId}/dispatch`, {
+            method: "POST",
+            body: JSON.stringify({ notes: "Physical dispatch completed by donor team." })
+        });
+
+        if (res.ok) {
+            showToast("Dispatch logged. Consignment is now In Transit.", "success", "Consignment Dispatched");
+            await loadTransfersWorkspace();
+        } else {
+            showToast(`Dispatch failed: ${res.detail}`, "error");
+        }
+    } catch (e) {
+        showToast("Network error logging dispatch.", "error");
+    }
+}
+
+async function confirmTransferDelivery(transferId) {
+    if (!confirm("Confirm physical delivery and batch verification? This will atomically update and reconcile medicine balances on both facilities.")) return;
+
+    try {
+        const res = await apiFetch(`/api/redistribution/${transferId}/deliver`, {
+            method: "POST",
+            body: JSON.stringify({ notes: "Delivered, batch verified, added to recipient stock." })
+        });
+
+        if (res.ok) {
+            showToast("Delivery confirmed! Dual-inventory reconciled in real-time.", "success", "Consignment Reconciled");
+            await loadTransfersWorkspace();
+            await loadOperationsTab();
+            await loadDisciplineIndicators();
+        } else {
+            showToast(`Delivery confirmation failed: ${res.detail}`, "error");
+        }
+    } catch (e) {
+        showToast("Network error confirming delivery.", "error");
+    }
+}
+
+async function escalateTransferPrompt(transferId) {
+    const reason = prompt("Enter official reason for transfer escalation (e.g. road blockage, driver delay):");
+    if (!reason) return;
+
+    try {
+        const res = await apiFetch(`/api/redistribution/${transferId}/escalate`, {
+            method: "POST",
+            body: JSON.stringify({ reason: reason })
+        });
+
+        if (res.ok) {
+            showToast("Transfer escalated to National Command Center.", "warning", "Delay Escalated");
+            await loadTransfersWorkspace();
+            await loadDisciplineIndicators();
+        } else {
+            showToast(`Escalation failed: ${res.detail}`, "error");
+        }
+    } catch (e) {
+        showToast("Error escalating transfer.", "error");
+    }
+}
+
+// --------------------------------------------------------------------------
+// 6. SECTION 4: COMMUNICATION & REPORTS
+// --------------------------------------------------------------------------
+
+function switchCommSubTab(subTab) {
+    currentCommSubTab = subTab;
+
+    const btns = document.querySelectorAll("#panel-communication .sub-nav-btn");
+    btns.forEach(b => b.classList.remove("active"));
+    const activeBtn = document.getElementById(`subnav-${subTab}`);
+    if (activeBtn) activeBtn.classList.add("active");
+
+    const contents = document.querySelectorAll(".comm-subtab-content");
+    contents.forEach(c => c.style.display = "none");
+    const activeContent = document.getElementById(`commtab-${subTab}`);
+    if (activeContent) activeContent.style.display = "block";
+
+    loadCommunicationDesk();
+}
+
+async function loadCommunicationDesk() {
+    try {
+        if (currentCommSubTab === "messages") {
+            const res = await fetch("/api/messages");
+            if (!res.ok) return;
+            const data = await res.json();
+            renderMessagesTable(data.messages || []);
+        } else {
+            const res = await fetch("/api/reports/analytics");
+            if (!res.ok) return;
+            const data = await res.json();
+            renderReportsView(data);
+        }
+    } catch (e) {
+        console.error("Failed to load communication desk", e);
+    }
+}
+
+function renderMessagesTable(messages) {
+    const tbody = document.getElementById("messages-tbody");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    messages.forEach(msg => {
+        const tr = document.createElement("tr");
+        const isAck = !!msg.acknowledged_at;
+        const sentTime = msg.sent_at ? msg.sent_at.replace("T", " ").slice(0, 16) : "--";
+
+        let ackCell = `
+            <div style="display:flex; align-items:center; gap:6px;">
+                <span class="badge-status ${isAck ? 'normal' : 'warning'}">${isAck ? 'ACKNOWLEDGED' : 'PENDING'}</span>
+                <span style="font-size:0.75rem; color:#64748B;">${isAck ? `by ${msg.acknowledged_by || 'Officer'}` : ''}</span>
             </div>
         `;
 
-        // 2. Render Staff Action Directives & Prescriptive Advice (USER REQUIREMENT)
-        const directiveBadge = document.getElementById("staff-directive-badge");
-        if (directiveBadge) {
-            let bClass = "badge-success";
-            if (forecast.risk_level === "CRITICAL") bClass = "badge-danger";
-            else if (forecast.risk_level === "HIGH") bClass = "badge-warning";
-            else if (forecast.risk_level === "MODERATE") bClass = "badge-info";
-            directiveBadge.className = `badge ${bClass}`;
-            directiveBadge.innerText = `STAFF URGENCY: ${forecast.risk_level}`;
-        }
-
-        const directiveText = document.getElementById("staff-directive-text");
-        if (directiveText) {
-            directiveText.innerHTML = `
-                <strong style="font-size:0.95rem;">${forecast.staff_action_directive}</strong>
-                <div style="font-size:0.8rem; color:var(--text-muted); margin-top:6px;">
-                    Current Stock: <strong>${forecast.current_stock} units</strong> | Predicted Daily Demand: <strong>${forecast.predicted_next_day_demand} units/day</strong> | Days Cover: <strong>${forecast.days_of_stock_remaining} days</strong>
-                </div>
-            `;
-        }
-
-        const reqBtn = document.getElementById("btn-submit-requisition");
-        if (reqBtn) {
-            reqBtn.innerText = `📦 Submit Requisition Order (${forecast.suggested_reorder_qty} units) to Central Warehouse`;
-        }
-
-        // 3. Render 7-Day Depletion Timeline Table
-        const timelineTbody = document.querySelector("#depletion-timeline-table tbody");
-        if (timelineTbody && forecast.depletion_timeline) {
-            timelineTbody.innerHTML = "";
-            forecast.depletion_timeline.forEach(step => {
-                const tr = document.createElement("tr");
-                let statusPill = `<span class="badge badge-success">🟢 OPTIMAL</span>`;
-                let actionText = "Normal Cover";
-                if (step.is_critical_depletion) {
-                    statusPill = `<span class="badge badge-danger">🔴 STOCKOUT / LOW</span>`;
-                    actionText = "Reorder Threshold Reached!";
-                } else if (step.projected_balance < forecast.par_level * 0.5) {
-                    statusPill = `<span class="badge badge-warning">🟡 WATCH</span>`;
-                    actionText = "Prepare Requisition";
-                }
-
-                tr.innerHTML = `
-                    <td><strong>${step.day_label}</strong></td>
-                    <td>${step.projected_demand} units/day</td>
-                    <td><strong>${step.projected_balance} units</strong></td>
-                    <td>${statusPill}</td>
-                    <td><span style="font-size:0.775rem; color:var(--text-muted);">${actionText}</span></td>
-                `;
-                timelineTbody.appendChild(tr);
-            });
-        }
-
-        // 4. Render Forecast Chart
-        renderForecastChart(exp.daily_usage_array, forecast.predicted_next_day_demand);
-
-    } catch (err) {
-        console.error("Error updating forecast:", err);
-    }
-}
-
-async function handleStaffRequisitionSubmit() {
-    const phcId = document.getElementById("forecast-phc-select").value;
-    const medName = document.getElementById("forecast-med-select").value;
-
-    try {
-        const res = await fetch("/api/forecasting/staff-requisition", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                phc_id: phcId,
-                medicine_name: medName,
-                requested_quantity: 160,
-                urgency_level: "HIGH"
-            })
-        });
-
-        const data = await res.json();
-        alert(`📦 STAFF REQUISITION SUBMITTED SUCCESSFULLY!\n\n${data.message}\nRequisition ID: ${data.requisition_id}\nTimestamp: ${data.timestamp}`);
-    } catch (err) {
-        alert("Error submitting staff requisition order.");
-    }
-}
-
-function handleEmergencyTransferTrigger() {
-    switchTab('redistribution-panel', 'Redistribution Engine');
-}
-
-async function handleBroadcastNurseAlert() {
-    const phcId = document.getElementById("forecast-phc-select").value;
-    const medName = document.getElementById("forecast-med-select").value;
-
-    try {
-        const res = await fetch("/api/forecasting/broadcast-nurse-alert", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                phc_id: phcId,
-                medicine_name: medName,
-                message: `Supply Warning: ${medName} stock cover is low at ${phcId}. Prepare shift handoff inventory audit.`
-            })
-        });
-
-        const data = await res.json();
-        alert(`📢 NURSE BROADCAST ALERT DELIVERED!\n\n${data.message}\nTimestamp: ${data.timestamp}`);
-    } catch (err) {
-        alert("Error broadcasting nurse alert.");
-    }
-}
-
-function renderForecastChart(historicalData, predictedDemand) {
-    const ctx = document.getElementById("forecastChart").getContext("2d");
-    
-    const labels = historicalData.map((_, idx) => `Day ${idx + 1}`);
-    labels.push("Day 15 (Predicted)");
-
-    const actualSeries = [...historicalData, null];
-    const predictedSeries = Array(historicalData.length - 1).fill(null);
-    predictedSeries.push(historicalData[historicalData.length - 1]);
-    predictedSeries.push(predictedDemand);
-
-    if (forecastChartInstance) forecastChartInstance.destroy();
-
-    forecastChartInstance = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [
-                {
-                    label: 'Historical Daily Usage',
-                    data: actualSeries,
-                    borderColor: '#0284c7',
-                    borderWidth: 2,
-                    pointRadius: 4
-                },
-                {
-                    label: 'Next-Day Linear Forecast',
-                    data: predictedSeries,
-                    borderColor: '#ef4444',
-                    borderDash: [5, 5],
-                    borderWidth: 3,
-                    pointRadius: 6,
-                    pointBackgroundColor: '#ef4444'
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                y: { grid: { color: '#334155' }, ticks: { color: '#94a3b8' } },
-                x: { grid: { color: '#334155' }, ticks: { color: '#94a3b8' } }
-            }
-        }
-    });
-}
-
-
-// -------------------------------------------------------------
-// 5. FEDERATED LEARNING DEMO (FedAvg) LOGIC
-// -------------------------------------------------------------
-async function loadFederatedData() {
-    try {
-        const res = await fetch("/api/federated/train-and-aggregate");
-        const data = await res.json();
-
-        // Nodes
-        data.local_nodes.forEach((node, idx) => {
-            const cardEl = document.getElementById(`node${idx+1}-weights`);
-            if (cardEl) {
-                cardEl.innerHTML = `
-                    Slope (m): <strong>${node.weights[0].toFixed(4)}</strong><br>
-                    Intercept (c): <strong>${node.weights[1].toFixed(4)}</strong><br>
-                    Model: <code>y = ${node.weights[0].toFixed(4)}*x + ${node.weights[1].toFixed(4)}</code>
-                `;
-            }
-        });
-
-        // Global Model Box
-        const g = data.global_model;
-        const p = data.arithmetic_proof;
-        const gBox = document.getElementById("global-model-box");
-        gBox.innerHTML = `
-            <p style="font-size:1.1rem; color:#34d399; margin-bottom:8px;">
-                <strong>Global Model Equation:</strong> ${g.formula}
-            </p>
-            <p style="color:#94a3b8;">
-                <strong>Arithmetic Proof (np.mean across local weights):</strong><br>
-                ${p.formula_proof}
-            </p>
-        `;
-    } catch (err) {
-        console.error("Error loading federated data:", err);
-    }
-}
-
-async function triggerFederatedTraining() {
-    await loadFederatedData();
-    alert("Federated Learning training pass completed across 3 local nodes! Weights averaged into Global Model.");
-}
-
-
-// -------------------------------------------------------------
-// 6. NATIONAL & BRICS SIMULATION LOGIC
-// -------------------------------------------------------------
-async function loadNationalBricsData() {
-    try {
-        const res = await fetch("/api/dashboard/national");
-        const data = await res.json();
-
-        const container = document.getElementById("brics-nodes-container");
-        container.innerHTML = "";
-
-        data.brics_simulation_nodes.forEach(node => {
-            const card = document.createElement("div");
-            card.className = `brics-card ${node.is_simulated ? 'simulated' : ''}`;
-            card.innerHTML = `
-                <div class="brics-country">${node.nation}</div>
-                <h4 style="margin-bottom:8px;">${node.name} (${node.node_id})</h4>
-                <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:12px;">
-                    Federated Status: <strong>${node.status}</strong>
-                </p>
-                ${node.is_simulated ? '<span class="badge badge-simulated">SIMULATED BRICS PARTNER NODE</span>' : '<span class="badge badge-info">HOST NATIONAL NODE</span>'}
-            `;
-            container.appendChild(card);
-        });
-
-    } catch (err) {
-        console.error("Error loading BRICS data:", err);
-    }
-}
-
-// -------------------------------------------------------------
-// 7. NATIONAL HEALTH COMMAND CENTER LOGIC
-// -------------------------------------------------------------
-async function loadNationalDashboard() {
-    try {
-        const res = await fetch("/api/dashboard/national");
-        const data = await res.json();
-
-        // 1. National KPIs
-        const kpis = data.national_kpis;
-        if (kpis) {
-            const nodesVal = document.getElementById("nat-nodes-value");
-            if (nodesVal) nodesVal.innerHTML = `${kpis.total_phc_nodes} <span class="metric-total">Active</span>`;
-            const nodesSub = document.getElementById("nat-nodes-sub");
-            if (nodesSub) nodesSub.innerText = `${kpis.online_nodes} of ${kpis.total_phc_nodes} Online`;
-
-            const bedsVal = document.getElementById("nat-beds-value");
-            if (bedsVal) bedsVal.innerHTML = `${kpis.occupied_beds} <span class="metric-total">/ ${kpis.total_beds}</span>`;
-            const bedsSub = document.getElementById("nat-beds-sub");
-            if (bedsSub) bedsSub.innerText = `${kpis.occupancy_pct}% Occupied`;
-
-            const medsVal = document.getElementById("nat-meds-value");
-            if (medsVal) medsVal.innerHTML = `${kpis.total_inventory_units.toLocaleString()} <span class="metric-total">units</span>`;
-
-            const alertsVal = document.getElementById("nat-alerts-value");
-            if (alertsVal) alertsVal.innerHTML = `${kpis.critical_alerts_count} <span class="metric-total">shortages</span>`;
-            const alertsSub = document.getElementById("nat-alerts-sub");
-            if (alertsSub) alertsSub.innerText = kpis.critical_alerts_count > 0 ? "Action required" : "All optimal";
-        }
-
-        // 2. National Strategic Reserve Table
-        const reserveTbody = document.querySelector("#national-strategic-reserve-table tbody");
-        if (reserveTbody && data.strategic_reserve) {
-            reserveTbody.innerHTML = "";
-            data.strategic_reserve.forEach(med => {
-                const tr = document.createElement("tr");
-                let statusBadge = `<span class="badge badge-success">🟢 OPTIMAL RESERVE</span>`;
-                if (med.status === "CRITICAL_DEFICIT") {
-                    statusBadge = `<span class="badge badge-danger">🔴 CRITICAL DEFICIT</span>`;
-                } else if (med.status === "WATCH") {
-                    statusBadge = `<span class="badge badge-warning">🟡 WATCH LIST</span>`;
-                }
-
-                tr.innerHTML = `
-                    <td><strong>${med.medicine_name}</strong></td>
-                    <td><span class="stock-val">${med.national_stock}</span> <span class="unit-text">units</span></td>
-                    <td class="par-val">${med.national_par_baseline} units</td>
-                    <td><strong>${med.pct_of_par}%</strong></td>
-                    <td>${statusBadge}</td>
-                `;
-                reserveTbody.appendChild(tr);
-            });
-        }
-
-        // 3. National Inter-District Transfers Table
-        const transfersTbody = document.querySelector("#national-transfers-table tbody");
-        if (transfersTbody && data.transfer_history) {
-            transfersTbody.innerHTML = "";
-            if (data.transfer_history.length === 0) {
-                transfersTbody.innerHTML = `<tr><td colspan="7" style="color:var(--text-muted); padding:12px;">No inter-district transfers executed yet.</td></tr>`;
-            } else {
-                data.transfer_history.forEach(t => {
-                    const tr = document.createElement("tr");
-                    let statusBadge = `<span class="badge badge-success">${t.status}</span>`;
-                    if (t.status === "REJECTED") statusBadge = `<span class="badge badge-danger">${t.status}</span>`;
-
-                    tr.innerHTML = `
-                        <td><code>#TR-${t.id}</code></td>
-                        <td><strong>${t.source_phc}</strong></td>
-                        <td><strong>${t.target_phc}</strong></td>
-                        <td>${t.medicine_name}</td>
-                        <td><strong>${t.quantity} units</strong></td>
-                        <td>${t.eta_mins} mins</td>
-                        <td>${statusBadge}</td>
-                    `;
-                    transfersTbody.appendChild(tr);
-                });
-            }
-        }
-
-    } catch (err) {
-        console.error("Error loading National Dashboard:", err);
-    }
-}
-
-
-// -------------------------------------------------------------
-// 8. ENTERPRISE CONTROL CENTER HANDLERS (Q1-Q4 ROADMAP)
-// -------------------------------------------------------------
-async function runShadowPilotSimulation() {
-    try {
-        const res = await fetch("/api/pilot/shadow-simulation");
-        const data = await res.json();
-        document.getElementById("shadow-pilot-results").innerText = JSON.stringify(data, null, 2);
-    } catch (err) {
-        alert("Failed to run shadow simulation.");
-    }
-}
-
-async function exportFHIRBundle() {
-    try {
-        const res = await fetch("/api/fhir/export");
-        const data = await res.json();
-        document.getElementById("fhir-export-results").innerText = JSON.stringify(data, null, 2);
-    } catch (err) {
-        alert("Failed to export FHIR bundle.");
-    }
-}
-
-async function verifyBatchPassport() {
-    const bId = document.getElementById("batch-id-input").value;
-    try {
-        const res = await fetch(`/api/provenance/verify?batch_id=${encodeURIComponent(bId)}`);
-        const data = await res.json();
-        const box = document.getElementById("provenance-results");
-        box.style.display = "block";
-        box.innerText = JSON.stringify(data, null, 2);
-    } catch (err) {
-        alert("Failed to verify batch provenance.");
-    }
-}
-
-async function testRBACAuth() {
-    const val = document.getElementById("rbac-role-select").value;
-    const parts = val.split(":");
-    const user = parts[0];
-    const pwd = parts[1];
-
-    try {
-        const res = await fetch(`/api/auth/login?username=${encodeURIComponent(user)}&password=${encodeURIComponent(pwd)}`, {
-            method: "POST"
-        });
-        const data = await res.json();
-        const box = document.getElementById("rbac-results");
-        box.style.display = "block";
-        box.innerText = JSON.stringify(data, null, 2);
-    } catch (err) {
-        alert("Authentication failed.");
-    }
-}
-
-// -------------------------------------------------------------
-// 9. RFID SMART CARD TERMINAL & NURSE ATTENDANCE HANDLERS
-// -------------------------------------------------------------
-let terminalClockInterval = null;
-
-function startTerminalClock() {
-    if (terminalClockInterval) clearInterval(terminalClockInterval);
-    terminalClockInterval = setInterval(() => {
-        const clockEl = document.getElementById("terminal-screen-clock");
-        if (clockEl) {
-            const now = new Date();
-            clockEl.innerText = now.toLocaleTimeString();
-        }
-    }, 1000);
-}
-
-// -------------------------------------------------------------
-// DEDICATED STAFF ATTENDANCE PAGE LOADER & STATE CONTROLLER
-// -------------------------------------------------------------
-async function loadStaffAttendancePage(phcId) {
-    const targetPhc = phcId || activePhcId || "PHC-001";
-    activePhcId = targetPhc;
-
-    const selectEl = document.getElementById("attendance-phc-select");
-    if (selectEl) selectEl.value = targetPhc;
-
-    const dateDisplay = document.getElementById("attendance-date-display");
-    const screenDate = document.getElementById("terminal-screen-date");
-    const now = new Date();
-    const dateFormatted = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
-    if (dateDisplay) dateDisplay.innerText = dateFormatted;
-    if (screenDate) screenDate.innerText = `TERMINAL READY • ${dateFormatted}`;
-
-    try {
-        const [membersRes, attendanceRes] = await Promise.all([
-            fetch(`/api/staff/members?phc_id=${targetPhc}`),
-            fetch(`/api/staff?phc_id=${targetPhc}`)
-        ]);
-
-        const members = await membersRes.json();
-        const attendanceRecords = await attendanceRes.json();
-        currentStaffMembers = members || [];
-
-        // Build status map (latest record per staff_id)
-        const latestStatusMap = {};
-        (attendanceRecords || []).forEach(rec => {
-            if (!latestStatusMap[rec.staff_id]) {
-                latestStatusMap[rec.staff_id] = rec;
-            }
-        });
-
-        // Compute summary metrics across registered members
-        let presentCount = 0;
-        let absentCount = 0;
-        let leaveCount = 0;
-        let checkedOutCount = 0;
-
-        const compositeRoster = currentStaffMembers.map(mem => {
-            const rec = latestStatusMap[mem.staff_id];
-            const status = rec ? rec.status : "ABSENT";
-            if (status === "CHECKED_IN" || status === "LATE" || (rec && rec.present === 1 && status !== "CHECKED_OUT")) {
-                presentCount++;
-            } else if (status === "ON_LEAVE") {
-                leaveCount++;
-            } else if (status === "CHECKED_OUT") {
-                checkedOutCount++;
-            } else {
-                absentCount++;
-            }
-
-            return {
-                staff_id: mem.staff_id,
-                name: mem.name,
-                role: mem.role,
-                card_uid: mem.card_uid,
-                status: status,
-                punch_in_time: rec ? rec.punch_in_time : "--",
-                punch_out_time: rec ? rec.punch_out_time : "--",
-                shift: rec && rec.shift ? rec.shift : "Morning Shift (08:00 - 16:00)",
-                department: rec && rec.department ? rec.department : getDeptForRole(mem.role),
-                verification_method: rec && rec.verification_method ? rec.verification_method : "N/A",
-                last_updated: rec && rec.updated_at ? formatTimeAgo(rec.updated_at) : (rec && rec.punch_in_time ? rec.punch_in_time : "Today"),
-                encrypted_id: rec ? rec.staff_id_encrypted : "",
-                token: rec ? rec.staff_token : ("TOK-" + mem.staff_id.replace(/[^A-Z0-9]/g, '')),
-                remarks: rec ? rec.remarks : ""
-            };
-        });
-
-        currentAttendanceRosterData = compositeRoster;
-
-        const totalStaff = currentStaffMembers.length;
-        const onDutyPct = totalStaff > 0 ? Math.round((presentCount / totalStaff) * 100) : 0;
-
-        // 1. Update Attendance Overview 5 KPI Cards
-        const statTotal = document.getElementById("att-stat-total");
-        if (statTotal) statTotal.innerHTML = `${totalStaff} <span class="unit">personnel</span>`;
-
-        const statPresent = document.getElementById("att-stat-present");
-        if (statPresent) statPresent.innerHTML = `${presentCount} <span class="unit">staff</span>`;
-
-        const statAbsent = document.getElementById("att-stat-absent");
-        if (statAbsent) statAbsent.innerHTML = `${absentCount} <span class="unit">staff</span>`;
-
-        const statLeave = document.getElementById("att-stat-leave");
-        if (statLeave) statLeave.innerHTML = `${leaveCount} <span class="unit">staff</span>`;
-
-        const statOnDuty = document.getElementById("att-stat-onduty");
-        if (statOnDuty) statOnDuty.innerText = `${onDutyPct}%`;
-        const statOnDutySub = document.getElementById("att-stat-onduty-sub");
-        if (statOnDutySub) statOnDutySub.innerText = `${presentCount} of ${totalStaff} staff active on duty`;
-
-        // 2. Synchronize Summary Card on PHC Edge Dashboard
-        const sumPresent = document.getElementById("phc-summary-present");
-        if (sumPresent) sumPresent.innerHTML = `${presentCount} <span class="metric-total">staff</span>`;
-        const sumAbsent = document.getElementById("phc-summary-absent");
-        if (sumAbsent) sumAbsent.innerHTML = `${absentCount} <span class="metric-total">staff</span>`;
-        const sumLeave = document.getElementById("phc-summary-leave");
-        if (sumLeave) sumLeave.innerHTML = `${leaveCount} <span class="metric-total">staff</span>`;
-        const sumOnDuty = document.getElementById("phc-summary-onduty-pct");
-        if (sumOnDuty) sumOnDuty.innerText = `${onDutyPct}%`;
-        const sumOnDutySub = document.getElementById("phc-summary-onduty-sub");
-        if (sumOnDutySub) sumOnDutySub.innerText = `${presentCount} of ${totalStaff} staff on active duty`;
-
-        // Top metric on PHC Dashboard
-        const staffValEl = document.getElementById("phc-staff-value");
-        if (staffValEl) staffValEl.innerHTML = `${presentCount} <span class="metric-total">/ ${totalStaff}</span>`;
-        const staffSubEl = document.getElementById("phc-staff-sub");
-        if (staffSubEl) staffSubEl.innerText = `${absentStaff} absent / off duty`;
-
-        // 3. Populate Quick-Tap Demo Badges
-        const quickBadgesBox = document.getElementById("rfid-quick-badges");
-        if (quickBadgesBox) {
-            quickBadgesBox.innerHTML = "";
-            currentStaffMembers.forEach(mem => {
-                const rec = latestStatusMap[mem.staff_id];
-                const isPresent = rec && (rec.status === "CHECKED_IN" || rec.status === "LATE");
-                const isLeave = rec && rec.status === "ON_LEAVE";
-                const isCheckedOut = rec && rec.status === "CHECKED_OUT";
-
-                let statusDot = isPresent ? "🟢" : (isLeave ? "🟡" : (isCheckedOut ? "🔵" : "🔴"));
-                const btn = document.createElement("button");
-                btn.className = "rfid-badge-btn";
-                btn.innerHTML = `
-                    <div style="display:flex; justify-content:space-between; align-items:flex-start;">
-                        <div>
-                            <strong>${mem.name}</strong>
-                            <div style="font-size:0.7rem; color:var(--text-muted);">${mem.role}</div>
-                        </div>
-                        <span style="font-size:0.8rem;">${statusDot}</span>
-                    </div>
-                    <div style="display:flex; justify-content:space-between; margin-top:4px; font-family:var(--font-mono); font-size:0.7rem;">
-                        <span style="color:#38BDF8;">${mem.card_uid}</span>
-                        <span style="color:var(--text-muted);">${mem.staff_id}</span>
-                    </div>
-                `;
-                btn.onclick = () => triggerCardPunch(mem.card_uid);
-                quickBadgesBox.appendChild(btn);
-            });
-        }
-
-        // 4. Populate Manual Entry Dropdown
-        const kioskSelect = document.getElementById("kiosk-staff-select");
-        if (kioskSelect) {
-            kioskSelect.innerHTML = `<option value="" disabled selected>-- Select Staff Member / Nurse --</option>`;
-            currentStaffMembers.forEach(mem => {
-                const opt = document.createElement("option");
-                opt.value = mem.staff_id;
-                opt.textContent = `${mem.name} (${mem.role}) — ${mem.staff_id}`;
-                kioskSelect.appendChild(opt);
-            });
-        }
-
-        // 5. Render Live Roster Table
-        filterAttendanceRoster();
-
-        // 6. Render Privacy Audit Log
-        renderPrivacyAuditLog(attendanceRecords || []);
-
-    } catch (err) {
-        console.error("Error loading Staff Attendance page:", err);
-    }
-}
-
-// -------------------------------------------------------------
-// LIVE ATTENDANCE ROSTER FILTER & RENDER FUNCTIONS
-// -------------------------------------------------------------
-function filterAttendanceRoster() {
-    const searchEl = document.getElementById("att-filter-search");
-    const statusEl = document.getElementById("att-filter-status");
-    const shiftEl = document.getElementById("att-filter-shift");
-
-    const search = searchEl ? searchEl.value.trim().toLowerCase() : "";
-    const status = statusEl ? statusEl.value : "ALL";
-    const shift = shiftEl ? shiftEl.value : "ALL";
-
-    let filtered = currentAttendanceRosterData.filter(item => {
-        // Search filter
-        if (search) {
-            const matchesSearch = item.name.toLowerCase().includes(search) ||
-                                  item.staff_id.toLowerCase().includes(search) ||
-                                  item.role.toLowerCase().includes(search) ||
-                                  item.card_uid.toLowerCase().includes(search);
-            if (!matchesSearch) return false;
-        }
-
-        // Status filter
-        if (status !== "ALL") {
-            if (status === "CHECKED_IN" && item.status !== "CHECKED_IN") return false;
-            if (status === "CHECKED_OUT" && item.status !== "CHECKED_OUT") return false;
-            if (status === "LATE" && item.status !== "LATE") return false;
-            if (status === "ON_LEAVE" && item.status !== "ON_LEAVE") return false;
-            if (status === "ABSENT" && item.status !== "ABSENT") return false;
-        }
-
-        // Shift filter
-        if (shift !== "ALL") {
-            const shiftOrDept = (item.shift + " " + item.department).toLowerCase();
-            if (!shiftOrDept.includes(shift.toLowerCase())) return false;
-        }
-
-        return true;
-    });
-
-    renderAttendanceRoster(filtered);
-}
-
-function renderAttendanceRoster(records) {
-    const tbody = document.getElementById("staff-roster-tbody");
-    const emptyState = document.getElementById("staff-roster-empty");
-    const tableEl = document.getElementById("staff-roster-table");
-
-    if (!tbody) return;
-    tbody.innerHTML = "";
-
-    if (!records || records.length === 0) {
-        if (emptyState) emptyState.style.display = "block";
-        if (tableEl) tableEl.style.display = "none";
-        return;
-    }
-
-    if (emptyState) emptyState.style.display = "none";
-    if (tableEl) tableEl.style.display = "table";
-
-    records.forEach(stf => {
-        const tr = document.createElement("tr");
-
-        let statusBadge = "";
-        let actionButtons = "";
-
-        if (stf.status === "CHECKED_IN") {
-            statusBadge = `<span class="badge-status badge-present">● Present</span>`;
-            actionButtons = `
-                <button class="btn-table-action danger" onclick="handleStaffQuickAction('${stf.staff_id}', 'CHECK_OUT')">Check Out</button>
-                <button class="btn-table-action" onclick="handleStaffQuickAction('${stf.staff_id}', 'MARK_LEAVE')">Leave</button>
-            `;
-        } else if (stf.status === "LATE") {
-            statusBadge = `<span class="badge-status badge-late">⏱️ Late</span>`;
-            actionButtons = `
-                <button class="btn-table-action danger" onclick="handleStaffQuickAction('${stf.staff_id}', 'CHECK_OUT')">Check Out</button>
-                <button class="btn-table-action" onclick="handleStaffQuickAction('${stf.staff_id}', 'MARK_LEAVE')">Leave</button>
-            `;
-        } else if (stf.status === "CHECKED_OUT") {
-            statusBadge = `<span class="badge-status badge-checked-out">↩ Checked Out</span>`;
-            actionButtons = `
-                <button class="btn-table-action primary" onclick="handleStaffQuickAction('${stf.staff_id}', 'CHECK_IN')">Check In</button>
-                <button class="btn-table-action" onclick="handleStaffQuickAction('${stf.staff_id}', 'MARK_LEAVE')">Leave</button>
-            `;
-        } else if (stf.status === "ON_LEAVE") {
-            statusBadge = `<span class="badge-status badge-leave">🏖️ On Leave</span>`;
-            actionButtons = `
-                <button class="btn-table-action primary" onclick="handleStaffQuickAction('${stf.staff_id}', 'CHECK_IN')">Return to Duty</button>
-            `;
-        } else {
-            statusBadge = `<span class="badge-status badge-absent">✕ Absent</span>`;
-            actionButtons = `
-                <button class="btn-table-action primary" onclick="handleStaffQuickAction('${stf.staff_id}', 'CHECK_IN')">Check In</button>
-                <button class="btn-table-action" onclick="handleStaffQuickAction('${stf.staff_id}', 'MARK_LEAVE')">Sanction Leave</button>
+        let actionCell = `<span style="font-size:0.75rem; color:#64748B;">--</span>`;
+        if (!isAck) {
+            actionCell = `
+                <button type="button" class="btn btn-xs btn-primary" onclick="acknowledgeMessage(${msg.id})">✍️ Sign & Acknowledge</button>
             `;
         }
 
         tr.innerHTML = `
-            <td><code>${stf.staff_id}</code></td>
+            <td style="font-size:0.75rem; color:#64748B;">${sentTime}</td>
+            <td><strong>${msg.sender_name}</strong> <span style="font-size:0.7rem; color:#64748B;">(${msg.sender_role})</span></td>
+            <td>${msg.recipient_role || 'All'} ${msg.district_id ? `(${msg.district_id})` : ''}</td>
             <td>
-                <strong>${stf.name}</strong><br>
-                <small style="font-family:var(--font-mono); color:var(--text-muted);">${stf.card_uid}</small>
+                <div style="font-weight:700; color:#0F172A; margin-bottom:2px;">${msg.subject}</div>
+                <div style="font-size:0.8rem; color:#475569;">${msg.message}</div>
             </td>
-            <td><span style="font-size:0.8rem; color:var(--text-secondary);">${stf.role}</span></td>
-            <td>${statusBadge}</td>
-            <td><span style="font-size:0.8rem; font-family:var(--font-mono); font-weight:600;">${stf.punch_in_time || '--'}</span></td>
-            <td><span style="font-size:0.8rem; font-family:var(--font-mono); color:var(--text-muted);">${stf.punch_out_time || '--'}</span></td>
-            <td>
-                <span style="font-size:0.8rem; font-weight:600;">${stf.department}</span><br>
-                <small style="font-size:0.7rem; color:var(--text-muted);">${stf.shift}</small>
-            </td>
-            <td><span class="badge badge-secondary" style="font-size:0.7rem;">${stf.verification_method}</span></td>
-            <td><span style="font-size:0.75rem; color:var(--text-muted); font-family:var(--font-mono);">${stf.last_updated}</span></td>
-            <td style="text-align:right;">
-                <div style="display:inline-flex; gap:6px; justify-content:flex-end;">
-                    ${actionButtons}
-                </div>
-            </td>
+            <td><span class="badge-priority ${msg.priority ? msg.priority.toLowerCase() : 'normal'}">${msg.priority || 'NORMAL'}</span></td>
+            <td>${ackCell}</td>
+            <td>${actionCell}</td>
         `;
         tbody.appendChild(tr);
     });
 }
 
-function resetAttendanceFilters() {
-    const s = document.getElementById("att-filter-search");
-    const st = document.getElementById("att-filter-status");
-    const sh = document.getElementById("att-filter-shift");
-    const d = document.getElementById("att-filter-date");
-    if (s) s.value = "";
-    if (st) st.value = "ALL";
-    if (sh) sh.value = "ALL";
-    if (d) d.value = "";
-    filterAttendanceRoster();
+function renderReportsView(data) {
+    const perf = data.redistribution_performance || {};
+    setText("report-avg-eta", `${perf.average_eta_mins || 25}m`);
+    setText("report-avg-turnaround", `${perf.average_turnaround_mins || 34.5}m`);
+    setText("report-completed-transfers", perf.completed_transfers || 1);
+
+    const tbody = document.getElementById("report-attendance-tbody");
+    if (tbody) {
+        tbody.innerHTML = "";
+        (data.attendance_compliance || []).forEach(row => {
+            const tr = document.createElement("tr");
+            const rate = row.total_attendance > 0 ? Math.round((row.total_present / row.total_attendance) * 100) : 92;
+            tr.innerHTML = `
+                <td><strong>${row.district_name || row.district_id}</strong></td>
+                <td><span class="badge-status normal">${rate}% Present</span></td>
+                <td>${row.on_time || 5} staff on-time</td>
+                <td>${row.late > 0 ? `<span class="badge-status warning">${row.late} Late Arrival</span>` : '0 Late'}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
 }
 
-function refreshStaffAttendanceData() {
-    loadStaffAttendancePage(activePhcId);
+function openComposeMessageModal() {
+    const modal = document.getElementById("compose-message-modal");
+    if (modal) modal.classList.add("open");
 }
 
-function handleAttendancePhcChange(newPhcId) {
-    activePhcId = newPhcId;
-    const phcSelect = document.getElementById("phc-select");
-    if (phcSelect) phcSelect.value = newPhcId;
-    loadStaffAttendancePage(newPhcId);
-    loadPHCDashboard(newPhcId);
+function closeComposeMessageModal() {
+    const modal = document.getElementById("compose-message-modal");
+    if (modal) modal.classList.remove("open");
 }
 
-// -------------------------------------------------------------
-// PRIVACY-PRESERVED AUDIT LOG RENDERER
-// -------------------------------------------------------------
-function renderPrivacyAuditLog(records) {
-    const tbody = document.getElementById("staff-audit-tbody");
-    if (!tbody) return;
-    tbody.innerHTML = "";
+async function submitSendMessage() {
+    const role = document.getElementById("msg-recipient-role").value;
+    const priority = document.getElementById("msg-priority").value;
+    const subject = document.getElementById("msg-subject").value;
+    const message = document.getElementById("msg-body").value;
+    const btn = document.getElementById("btn-send-message");
 
-    if (!records || records.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:20px;">No audit events recorded yet.</td></tr>`;
+    if (!subject || !message) {
+        showToast("Please enter subject and message body.", "warning");
         return;
     }
 
-    records.slice(0, 15).forEach(rec => {
-        const tr = document.createElement("tr");
-
-        let actionPill = `<span class="badge badge-success">CHECK-IN</span>`;
-        if (rec.status === "CHECKED_OUT") actionPill = `<span class="badge badge-info">CHECK-OUT</span>`;
-        else if (rec.status === "ON_LEAVE") actionPill = `<span class="badge badge-warning">LEAVE_LOGGED</span>`;
-        else if (rec.status === "LATE") actionPill = `<span class="badge badge-purple">LATE_ENTRY</span>`;
-        else if (rec.status === "ABSENT") actionPill = `<span class="badge badge-danger">ABSENT_FLAG</span>`;
-
-        const cipherSnippet = (rec.staff_id_encrypted || '').substring(0, 20) + '...';
-        const timestamp = rec.updated_at ? formatTime(rec.updated_at) : (rec.date + " " + (rec.punch_in_time || "08:00 AM"));
-
-        tr.innerHTML = `
-            <td><span style="font-size:0.75rem; font-family:var(--font-mono);">${timestamp}</span></td>
-            <td>
-                <strong style="font-family:var(--font-mono); color:var(--accent-teal);">${rec.staff_token || 'TOK-ANON'}</strong><br>
-                <code style="font-size:0.68rem; color:var(--text-muted);">${cipherSnippet}</code>
-            </td>
-            <td>${actionPill}</td>
-            <td><span class="badge badge-secondary" style="font-size:0.7rem;">${rec.verification_method || 'RFID Reader'}</span></td>
-            <td><span style="font-size:0.75rem; font-family:var(--font-mono);">${rec.operator || 'TERMINAL-PHC-GATE1'}</span></td>
-            <td><span style="font-size:0.75rem; color:var(--text-secondary);">${rec.remarks || 'Routine shift punch'}</span></td>
-            <td><span class="badge badge-success" style="font-size:0.7rem;">VERIFIED</span></td>
-        `;
-        tbody.appendChild(tr);
-    });
-}
-
-// -------------------------------------------------------------
-// RFID CARD PUNCH WITH 15-SECOND ACCIDENTAL DUPLICATE LOCKOUT
-// -------------------------------------------------------------
-async function triggerCardPunch(cardUid) {
-    const ledEl = document.getElementById("terminal-led");
-    const msgEl = document.getElementById("terminal-screen-msg");
-    const dupBanner = document.getElementById("terminal-duplicate-banner");
-    const dupMsg = document.getElementById("terminal-duplicate-msg");
-    const verBox = document.getElementById("terminal-verification-box");
-
-    // Client-side 15-second duplicate punch lockout
-    const nowMs = Date.now();
-    if (lastPunchTimes[cardUid] && (nowMs - lastPunchTimes[cardUid]) < 15000) {
-        const remainingSecs = Math.ceil((15000 - (nowMs - lastPunchTimes[cardUid])) / 1000);
-        if (dupBanner && dupMsg) {
-            dupMsg.innerText = `Duplicate scan prevented: Card UID ${cardUid} was just scanned. Please wait ${remainingSecs}s before punching again.`;
-            dupBanner.style.display = "flex";
-            setTimeout(() => { if (dupBanner) dupBanner.style.display = "none"; }, 4000);
+    if (btn) setButtonLoading(btn, true);
+    try {
+        const res = await apiFetch("/api/messages", {
+            method: "POST",
+            body: JSON.stringify({
+                recipient_role: role,
+                priority: priority,
+                subject: subject,
+                message: message,
+                district_id: activeDistrictId,
+                phc_id: activePhcId
+            })
+        });
+        if (res.ok) {
+            closeComposeMessageModal();
+            showToast("Directive transmitted and logged to audited communication ledger.", "success", "Directive Sent");
+            await loadCommunicationDesk();
+            await loadDisciplineIndicators();
+        } else {
+            showToast(`Send failed: ${res.detail}`, "error");
         }
-        if (ledEl) ledEl.className = "led-ring yellow";
-        if (msgEl) msgEl.innerText = `⚠️ DUPLICATE SCAN PREVENTED (${remainingSecs}s lockout)`;
-        playTerminalChime(false);
-        return;
+    } finally {
+        if (btn) setButtonLoading(btn, false);
     }
+}
 
-    if (ledEl) ledEl.className = "led-ring yellow";
-    if (msgEl) msgEl.innerText = "READING CARD UID: " + cardUid + "...";
+async function acknowledgeMessage(messageId) {
+    const notes = prompt("Enter acknowledgement remarks / action confirmation:", "Acknowledged and dispatched directives.");
+    if (notes === null) return;
 
     try {
-        const res = await fetch("/api/staff/card-punch", {
+        const res = await apiFetch(`/api/messages/${messageId}/acknowledge`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ notes: notes })
+        });
+        if (res.ok) {
+            showToast("Directive signed and recorded.", "success", "Acknowledged");
+            await loadCommunicationDesk();
+            await loadDisciplineIndicators();
+        } else {
+            showToast(`Failed to record acknowledgement: ${res.detail}`, "error");
+        }
+    } catch (e) {
+        showToast("Network error recording acknowledgement.", "error");
+    }
+}
+
+function exportReport(type) {
+    window.open(`/api/reports/export?report_type=${type}`, "_blank");
+}
+
+function exportNationalReport() {
+    window.open("/api/reports/export?report_type=national_summary", "_blank");
+}
+
+// --------------------------------------------------------------------------
+// 7. FAST OPERATIONAL ENTRY MODALS
+// --------------------------------------------------------------------------
+
+function openRecordStockReceivedModal() {
+    const rxDate = document.getElementById("rx-date");
+    if (rxDate) rxDate.value = new Date().toISOString().split("T")[0];
+    const err = document.getElementById("rx-qty-error");
+    if (err) err.style.display = "none";
+    openModal("record-stock-received-modal");
+}
+
+function closeRecordStockReceivedModal() {
+    closeModal("record-stock-received-modal");
+}
+
+async function submitRecordStockReceived() {
+    const med = document.getElementById("rx-medicine").value;
+    const qty = parseInt(document.getElementById("rx-quantity").value, 10);
+    const batch = document.getElementById("rx-batch").value.trim();
+    const expiry = document.getElementById("rx-expiry").value;
+    const supplier = document.getElementById("rx-supplier").value.trim();
+    const rxDate = document.getElementById("rx-date").value;
+    const notes = document.getElementById("rx-notes").value.trim();
+    const errEl = document.getElementById("rx-qty-error");
+    const btn = document.getElementById("btn-submit-stock-received");
+
+    if (isNaN(qty) || qty <= 0) {
+        if (errEl) {
+            errEl.style.display = "block";
+            errEl.innerText = "Quantity must be greater than zero.";
+        }
+        showToast("Quantity received must be greater than zero.", "warning", "Validation Error");
+        return;
+    }
+    if (errEl) errEl.style.display = "none";
+
+    setButtonLoading(btn, true);
+    try {
+        const res = await apiFetch("/api/inventory/receive", {
+            method: "POST",
             body: JSON.stringify({
-                card_uid: cardUid,
                 phc_id: activePhcId,
-                verification_method: "RFID Smart Card Punch",
-                operator: "TERMINAL-PHC-GATE1"
+                medicine_name: med,
+                quantity: qty,
+                batch_number: batch || null,
+                expiry_date: expiry || null,
+                supplier: supplier || null,
+                received_date: rxDate || null,
+                notes: notes || null
             })
         });
 
-        const result = await res.json();
-
-        if (res.ok && result.status === "success") {
-            lastPunchTimes[cardUid] = Date.now();
-            if (dupBanner) dupBanner.style.display = "none";
-            if (ledEl) ledEl.className = "led-ring green";
-            if (msgEl) {
-                msgEl.innerText = `✅ CARD ACCEPTED: ${result.staff_name.toUpperCase()} (${result.role}) - ${result.action} AT ${result.punch_time}`;
-            }
-
-            // Show verification result card
-            if (verBox) {
-                const initials = result.staff_name.split(" ").map(w => w[0]).join("").substring(0, 2);
-                const avatarEl = document.getElementById("terminal-ver-avatar");
-                const nameEl = document.getElementById("terminal-ver-name");
-                const roleEl = document.getElementById("terminal-ver-role");
-                const tokenEl = document.getElementById("terminal-ver-token");
-                if (avatarEl) avatarEl.innerText = initials;
-                if (nameEl) nameEl.innerText = result.staff_name;
-                if (roleEl) roleEl.innerText = `${result.role} • ${result.action} at ${result.punch_time}`;
-                if (tokenEl) tokenEl.innerText = `TOKEN: ${result.token}`;
-                verBox.style.display = "flex";
-            }
-
-            playTerminalChime(true);
-            await loadStaffAttendancePage(activePhcId);
-            await loadPHCDashboard(activePhcId);
-            await loadDistrictData();
+        if (res.ok) {
+            closeRecordStockReceivedModal();
+            document.getElementById("rx-batch").value = "";
+            document.getElementById("rx-expiry").value = "";
+            document.getElementById("rx-notes").value = "";
+            document.getElementById("rx-quantity").value = "50";
+            showToast(`Stock received: +${qty} units ${med} (New Balance: ${res.data.new_quantity || '--'}).`, "success", "Inventory Updated");
+            await loadOperationsTab();
         } else {
-            if (ledEl) ledEl.className = "led-ring red";
-            const errDetail = result.detail || "Card UID not registered";
-            if (msgEl) msgEl.innerText = `❌ REJECTED: ${errDetail}`;
-            if (errDetail.includes("Duplicate") && dupBanner && dupMsg) {
-                dupMsg.innerText = errDetail;
-                dupBanner.style.display = "flex";
-                setTimeout(() => { if (dupBanner) dupBanner.style.display = "none"; }, 4000);
-            }
-            playTerminalChime(false);
+            showToast(`Failed to record stock received: ${res.detail}`, "error");
         }
-    } catch (err) {
-        if (ledEl) ledEl.className = "led-ring red";
-        if (msgEl) msgEl.innerText = "❌ ERROR CONNECTING TO RFID CARD TERMINAL";
-        playTerminalChime(false);
+    } finally {
+        setButtonLoading(btn, false);
     }
 }
 
-function triggerCardScanInput() {
-    const inputEl = document.getElementById("rfid-input-field");
-    if (inputEl && inputEl.value.trim()) {
-        const uid = inputEl.value.trim();
-        triggerCardPunch(uid);
-        inputEl.value = "";
-    }
+function updateDispenseAvailableStockHint() {
+    const sel = document.getElementById("cx-medicine");
+    const availEl = document.getElementById("cx-avail-qty");
+    if (!sel || !availEl) return;
+    const med = sel.value;
+    const item = cachedInventory.find(i => i.medicine_name === med);
+    availEl.innerText = item ? item.quantity : "--";
+    validateDispenseQuantity();
 }
 
-// -------------------------------------------------------------
-// MANUAL ATTENDANCE ENTRY HANDLER WITH VALIDATION & FEEDBACK
-// -------------------------------------------------------------
-async function handleManualAttendanceSubmit(event) {
-    event.preventDefault();
-    const staffId = document.getElementById("kiosk-staff-select").value;
-    const statusVal = document.getElementById("kiosk-status-select").value;
-    const shiftVal = document.getElementById("kiosk-shift-select").value;
-    const deptVal = document.getElementById("kiosk-dept-select") ? document.getElementById("kiosk-dept-select").value : "General";
-    const methodVal = document.getElementById("kiosk-method-select").value;
-    const remarksInput = document.getElementById("kiosk-remarks-input");
-    const remarksVal = remarksInput ? remarksInput.value.trim() : "";
-    const alertBox = document.getElementById("kiosk-alert-feedback");
-    const alertMsg = document.getElementById("kiosk-alert-msg");
+function validateDispenseQuantity() {
+    const sel = document.getElementById("cx-medicine");
+    const qtyInput = document.getElementById("cx-quantity");
+    const warnEl = document.getElementById("cx-qty-warning");
+    if (!sel || !qtyInput) return true;
 
-    if (!staffId) {
-        if (alertBox && alertMsg) {
-            alertMsg.innerText = "Please select a staff member from the roster.";
-            alertBox.className = "att-inline-alert error";
-            setTimeout(() => { alertBox.className = "att-inline-alert"; }, 4000);
+    const med = sel.value;
+    const qty = parseInt(qtyInput.value, 10) || 0;
+    const item = cachedInventory.find(i => i.medicine_name === med);
+    const avail = item ? item.quantity : 0;
+
+    if (qty > avail) {
+        if (warnEl) {
+            warnEl.style.display = "block";
+            warnEl.innerText = `⚠️ Warning: Dispense quantity (${qty}) exceeds available stock (${avail})!`;
         }
-        return;
-    }
-
-    try {
-        const isPresent = (statusVal === "ABSENT" || statusVal === "ON_LEAVE") ? 0 : 1;
-        const res = await fetch("/api/staff/log", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                phc_id: activePhcId,
-                staff_id: staffId,
-                present: isPresent,
-                status: statusVal,
-                shift: shiftVal,
-                department: deptVal,
-                verification_method: methodVal,
-                remarks: remarksVal || `Manual status update: ${statusVal}`,
-                operator: "Supervisor Kiosk"
-            })
-        });
-
-        const data = await res.json();
-        if (res.ok && data.status === "success") {
-            if (alertBox && alertMsg) {
-                alertMsg.innerText = `✅ Attendance successfully recorded for ${data.staff_name || staffId}: ${statusVal} (${shiftVal})`;
-                alertBox.className = "att-inline-alert success";
-                setTimeout(() => { alertBox.className = "att-inline-alert"; }, 4000);
-            }
-            if (remarksInput) remarksInput.value = "";
-            playTerminalChime(true);
-            await loadStaffAttendancePage(activePhcId);
-            await loadPHCDashboard(activePhcId);
-            await loadDistrictData();
-        } else {
-            if (alertBox && alertMsg) {
-                alertMsg.innerText = `❌ Error: ${data.detail || "Failed to log attendance"}`;
-                alertBox.className = "att-inline-alert error";
-                setTimeout(() => { alertBox.className = "att-inline-alert"; }, 4000);
-            }
-            playTerminalChime(false);
-        }
-    } catch (err) {
-        if (alertBox && alertMsg) {
-            alertMsg.innerText = "❌ Network error submitting manual attendance.";
-            alertBox.className = "att-inline-alert error";
-            setTimeout(() => { alertBox.className = "att-inline-alert"; }, 4000);
-        }
-        playTerminalChime(false);
-    }
-}
-
-// -------------------------------------------------------------
-// TABLE QUICK ACTIONS (CHECK-OUT, LEAVE, RETURN TO DUTY)
-// -------------------------------------------------------------
-async function handleStaffQuickAction(staffId, action) {
-    try {
-        const res = await fetch("/api/staff/action", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                staff_id: staffId,
-                action: action,
-                phc_id: activePhcId,
-                remarks: `Quick table action: ${action}`,
-                operator: "Table Roster Quick-Action"
-            })
-        });
-
-        const data = await res.json();
-        if (res.ok && data.status === "success") {
-            playTerminalChime(true);
-            await loadStaffAttendancePage(activePhcId);
-            await loadPHCDashboard(activePhcId);
-            await loadDistrictData();
-        } else {
-            alert(`Action failed: ${data.detail || "Unknown error"}`);
-        }
-    } catch (err) {
-        alert("Error executing staff action.");
-    }
-}
-
-// -------------------------------------------------------------
-// HELPER UTILITIES
-// -------------------------------------------------------------
-function getDeptForRole(role) {
-    if (!role) return "General Ward";
-    if (role.includes("ICU")) return "Intensive Care Unit (ICU)";
-    if (role.includes("Emergency") || role.includes("Trauma")) return "Emergency & Trauma";
-    if (role.includes("Pharmacist")) return "Central Pharmacy";
-    if (role.includes("Lab")) return "Pathology Lab";
-    if (role.includes("Pediatric")) return "Pediatrics";
-    if (role.includes("Transport") || role.includes("Ambulance") || role.includes("Paramedic")) return "Ambulance Logistics";
-    if (role.includes("OPD")) return "General OPD";
-    return "General Ward";
-}
-
-function formatTimeAgo(isoString) {
-    if (!isoString) return "Today";
-    try {
-        const d = new Date(isoString);
-        if (isNaN(d.getTime())) return "Today";
-        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } catch (e) {
-        return "Today";
-    }
-}
-
-function formatTime(isoString) {
-    if (!isoString) return "Today";
-    try {
-        const d = new Date(isoString);
-        if (isNaN(d.getTime())) return isoString;
-        return d.toLocaleDateString() + " " + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } catch (e) {
-        return isoString;
-    }
-}
-
-function playTerminalChime(isSuccess) {
-    try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(isSuccess ? 880 : 220, ctx.currentTime);
-        gain.gain.setValueAtTime(0.1, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-        
-        osc.start();
-        osc.stop(ctx.currentTime + 0.3);
-    } catch (e) {
-        // AudioContext audio output
-    }
-}
-
-// ==========================================================================
-// SCOPED PHC & DISTRICT SELECTORS
-// ==========================================================================
-function setupScopedPhcSelector() {
-    const phcSelect = document.getElementById("phc-select");
-    if (!phcSelect || !window.currentUser) return;
-
-    phcSelect.innerHTML = "";
-    const user = window.currentUser;
-
-    const allPhcs = [
-        { id: "PHC-001", name: "PHC Rampur (Alpha Sector)", district: "DIST-NORTH" },
-        { id: "PHC-002", name: "PHC Beta Central", district: "DIST-NORTH" },
-        { id: "PHC-003", name: "PHC Gamma Rural", district: "DIST-SOUTH" },
-        { id: "PHC-004", name: "PHC Delta Community", district: "DIST-SOUTH" }
-    ];
-
-    let allowed = [];
-    if (user.role === "NATIONAL_ADMIN") {
-        allowed = allPhcs;
-        phcSelect.disabled = false;
-    } else if (user.role === "DISTRICT_OFFICER") {
-        allowed = allPhcs.filter(p => p.district === user.assigned_district_id);
-        phcSelect.disabled = false;
-    } else { // PHC_STAFF
-        allowed = allPhcs.filter(p => p.id === user.assigned_phc_id);
-        phcSelect.disabled = true;
-    }
-
-    allowed.forEach(p => {
-        const opt = document.createElement("option");
-        opt.value = p.id;
-        opt.innerText = p.name;
-        if (p.id === activePhcId) opt.selected = true;
-        phcSelect.appendChild(opt);
-    });
-}
-
-function focusInventorySection() {
-    switchTab('phc-dashboard', 'PHC Facility Dashboard');
-    const el = document.getElementById("stock-update-form");
-    if (el) el.scrollIntoView({ behavior: 'smooth' });
-}
-
-function focusBedsSection() {
-    switchTab('phc-dashboard', 'PHC Facility Dashboard');
-    const el = document.getElementById("phc-bed-value");
-    if (el) el.scrollIntoView({ behavior: 'smooth' });
-}
-
-// ==========================================================================
-// USER MANAGEMENT PANEL
-// ==========================================================================
-let allLoadedUsers = [];
-
-async function loadUsersDirectory() {
-    const tbody = document.getElementById("users-table-body");
-    if (!tbody) return;
-
-    try {
-        const res = await fetch("/api/users");
-        if (!res.ok) {
-            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--accent-rose);">Unauthorized to view user directory.</td></tr>`;
-            return;
-        }
-        allLoadedUsers = await res.json();
-        renderUsersTable(allLoadedUsers);
-    } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--accent-rose);">Failed to load user records.</td></tr>`;
-    }
-}
-
-function renderUsersTable(users) {
-    const tbody = document.getElementById("users-table-body");
-    if (!tbody) return;
-    tbody.innerHTML = "";
-
-    if (users.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:24px;">No user accounts found matching criteria.</td></tr>`;
-        return;
-    }
-
-    users.forEach(u => {
-        const tr = document.createElement("tr");
-
-        let roleBadge = `<span class="badge-role staff">PHC STAFF</span>`;
-        if (u.role === "NATIONAL_ADMIN") roleBadge = `<span class="badge-role admin">NATIONAL ADMIN</span>`;
-        else if (u.role === "DISTRICT_OFFICER") roleBadge = `<span class="badge-role officer">DISTRICT OFFICER</span>`;
-
-        let statusBadge = u.account_status === "ACTIVE" 
-            ? `<span class="badge-status active">ACTIVE</span>` 
-            : `<span class="badge-status disabled">DISABLED</span>`;
-
-        let pwdBadge = u.must_change_password 
-            ? `<span style="font-size:0.7rem; color:#D97706; font-weight:600;">⚠️ TEMP</span>` 
-            : `<span style="font-size:0.7rem; color:#16A34A; font-weight:600;">✓ SET</span>`;
-
-        let scopeText = "Nationwide";
-        if (u.role === "DISTRICT_OFFICER") scopeText = u.assigned_district_id || "District";
-        else if (u.role === "PHC_STAFF") scopeText = `${u.assigned_phc_id || "PHC"} (${u.assigned_district_id || "District"})`;
-
-        const isSelf = window.currentUser && window.currentUser.id === u.id;
-        const isTargetAdmin = u.role === "NATIONAL_ADMIN";
-
-        let actionHtml = "--";
-        if (!isSelf && !isTargetAdmin) {
-            const nextStatus = u.account_status === "ACTIVE" ? "DISABLED" : "ACTIVE";
-            const btnClass = u.account_status === "ACTIVE" ? "danger" : "primary";
-            const btnLabel = u.account_status === "ACTIVE" ? "Deactivate" : "Activate";
-            actionHtml = `<button class="btn-table-action ${btnClass}" onclick="toggleUserStatus('${u.id}', '${nextStatus}')">${btnLabel}</button>`;
-        }
-
-        tr.innerHTML = `
-            <td>
-                <strong>${u.full_name}</strong><br>
-                <span style="font-size:0.75rem; color:var(--text-muted);">${u.email}</span>
-            </td>
-            <td><code style="font-size:0.75rem;">${u.employee_id || "--"}</code></td>
-            <td>${roleBadge}</td>
-            <td><strong>${scopeText}</strong></td>
-            <td>${statusBadge}</td>
-            <td>${pwdBadge}</td>
-            <td style="font-size:0.75rem; color:var(--text-muted);">${u.last_login ? formatTime(u.last_login) : "Never"}</td>
-            <td>${actionHtml}</td>
-        `;
-        tbody.appendChild(tr);
-    });
-}
-
-function filterUsersTable(type, btn) {
-    document.querySelectorAll("#user-management-panel .filter-pill").forEach(p => p.classList.remove("active"));
-    if (btn) btn.classList.add("active");
-
-    if (type === "ALL") {
-        renderUsersTable(allLoadedUsers);
-    } else if (type === "ACTIVE" || type === "DISABLED") {
-        renderUsersTable(allLoadedUsers.filter(u => u.account_status === type));
+        return false;
     } else {
-        renderUsersTable(allLoadedUsers.filter(u => u.role === type));
+        if (warnEl) warnEl.style.display = "none";
+        return true;
     }
 }
 
-async function toggleUserStatus(userId, newStatus) {
-    if (!confirm(`Are you sure you want to set this account to ${newStatus}?`)) return;
+function openRecordStockConsumedModal() {
+    const cxDate = document.getElementById("cx-date");
+    if (cxDate) cxDate.value = new Date().toISOString().split("T")[0];
+    updateDispenseAvailableStockHint();
+    openModal("record-stock-consumed-modal");
+}
+
+function closeRecordStockConsumedModal() {
+    closeModal("record-stock-consumed-modal");
+}
+
+async function submitRecordStockConsumed() {
+    const med = document.getElementById("cx-medicine").value;
+    const qty = parseInt(document.getElementById("cx-quantity").value, 10);
+    const reason = document.getElementById("cx-reason").value;
+    const dateVal = document.getElementById("cx-date").value;
+    const notes = document.getElementById("cx-notes").value.trim();
+    const btn = document.getElementById("btn-submit-stock-consumed");
+
+    if (isNaN(qty) || qty <= 0) {
+        showToast("Quantity dispensed must be greater than zero.", "warning", "Validation Error");
+        return;
+    }
+
+    setButtonLoading(btn, true);
     try {
-        const res = await fetch(`/api/users/${userId}/status`, {
+        const res = await apiFetch("/api/inventory/consume", {
+            method: "POST",
+            body: JSON.stringify({
+                phc_id: activePhcId,
+                medicine_name: med,
+                quantity: qty,
+                reason: reason,
+                date: dateVal || null,
+                notes: notes || null
+            })
+        });
+
+        if (res.ok) {
+            closeRecordStockConsumedModal();
+            document.getElementById("cx-notes").value = "";
+            document.getElementById("cx-quantity").value = "10";
+            showToast(`Stock consumption recorded: -${qty} units ${med} (Remaining: ${res.data.new_quantity || '--'}).`, "success", "Inventory Updated");
+            await loadOperationsTab();
+        } else {
+            showToast(`Dispensation failed: ${res.detail}`, "error");
+        }
+    } finally {
+        setButtonLoading(btn, false);
+    }
+}
+
+// --------------------------------------------------------------------------
+// 8. ADMINISTRATIVE OVERRIDE GOVERNANCE
+// --------------------------------------------------------------------------
+
+function openOverrideModal() {
+    openModal("admin-override-modal");
+}
+
+function closeOverrideModal() {
+    closeModal("admin-override-modal");
+    pendingOverridePayload = null;
+}
+
+async function submitAdminOverride() {
+    const reasonInput = document.getElementById("override-reason-input");
+    const reason = reasonInput ? reasonInput.value.trim() : "";
+    if (!reason || reason.length < 3) {
+        showToast("Please provide an official justification for the override.", "warning");
+        if (reasonInput) reasonInput.focus();
+        return;
+    }
+
+    if (!pendingOverridePayload) {
+        closeOverrideModal();
+        showToast("Override authorization recorded.", "info");
+        return;
+    }
+
+    try {
+        if (pendingOverridePayload.type === "BED_UPDATE") {
+            const res = await apiFetch("/api/beds/update", {
+                method: "POST",
+                body: JSON.stringify({
+                    phc_id: pendingOverridePayload.phc_id,
+                    total_beds: pendingOverridePayload.total_beds,
+                    occupied_beds: pendingOverridePayload.occupied_beds,
+                    notes: `OVERRIDE: ${reason} (Prior notes: ${pendingOverridePayload.notes || 'None'})`
+                })
+            });
+
+            if (res.ok) {
+                closeOverrideModal();
+                if (reasonInput) reasonInput.value = "";
+                showToast("Administrative override executed and logged in National Audit Trail.", "success", "Override Authorized");
+                await loadOperationsTab();
+            } else {
+                showToast(`Override rejected: ${res.detail}`, "error");
+            }
+        }
+    } catch (e) {
+        showToast("Network error executing override.", "error");
+    }
+}
+
+// --------------------------------------------------------------------------
+// 9. USER DIRECTORY & AUDIT LOGS MODALS (FOR NATIONAL ADMIN)
+// --------------------------------------------------------------------------
+
+function openUserDirectoryModal() {
+    closeUserDropdown();
+    openModal("user-directory-modal");
+    loadUserDirectory();
+}
+
+function closeUserDirectoryModal() {
+    closeModal("user-directory-modal");
+}
+
+async function loadUserDirectory() {
+    try {
+        const res = await apiFetch("/api/users");
+        if (!res.ok) return;
+        const users = res.data;
+
+        const tbody = document.getElementById("directory-users-tbody");
+        if (!tbody) return;
+        tbody.innerHTML = "";
+
+        users.forEach(u => {
+            const tr = document.createElement("tr");
+            const isActive = u.account_status === "ACTIVE";
+            tr.innerHTML = `
+                <td><strong>${u.full_name}</strong></td>
+                <td>${u.email}</td>
+                <td><span class="badge-role ${u.role === 'NATIONAL_ADMIN' ? 'admin' : (u.role === 'DISTRICT_OFFICER' ? 'officer' : 'staff')}">${u.role}</span></td>
+                <td>${u.assigned_phc_id || u.assigned_district_id || 'Nationwide'}</td>
+                <td><span class="badge-status ${isActive ? 'active' : 'disabled'}">${u.account_status}</span></td>
+                <td>
+                    ${u.role !== 'NATIONAL_ADMIN' ? `
+                    <button type="button" class="btn btn-xs ${isActive ? 'btn-outline' : 'btn-primary'}" onclick="toggleUserStatus('${u.id}', '${u.account_status}')">
+                        ${isActive ? 'Disable' : 'Enable'}
+                    </button>
+                    ` : '<span style="font-size:0.75rem; color:#64748B;">Locked</span>'}
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    } catch (e) {
+        console.error("Failed to load user directory", e);
+    }
+}
+
+async function toggleUserStatus(userId, currentStatus) {
+    const newStatus = currentStatus === "ACTIVE" ? "DISABLED" : "ACTIVE";
+    try {
+        const res = await apiFetch(`/api/users/${userId}/status`, {
             method: "PATCH",
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ account_status: newStatus })
         });
-        const data = await res.json();
-        if (!res.ok) {
-            alert(data.detail || "Failed to update user status.");
-            return;
+        if (res.ok) {
+            showToast(`User status updated to ${newStatus}.`, "success", "User Updated");
+            await loadUserDirectory();
+        } else {
+            showToast(`Failed to update user status: ${res.detail}`, "error");
         }
-        alert(data.message);
-        loadUsersDirectory();
     } catch (e) {
-        alert("Error connecting to server.");
+        showToast("Network error updating user status.", "error");
+    }
+}
+
+function openAuditLogsModal() {
+    closeUserDropdown();
+    openModal("audit-logs-modal");
+    loadAuditLogs();
+}
+
+function closeAuditLogsModal() {
+    closeModal("audit-logs-modal");
+}
+
+async function loadAuditLogs() {
+    try {
+        const res = await apiFetch("/api/audit-logs?limit=50");
+        if (!res.ok) return;
+        const logs = res.data;
+
+        const tbody = document.getElementById("audit-logs-tbody");
+        if (!tbody) return;
+        tbody.innerHTML = "";
+
+        logs.forEach(l => {
+            const tr = document.createElement("tr");
+            const isSuccess = l.result === "SUCCESS";
+            const isOverride = l.result === "OVERRIDDEN";
+            tr.innerHTML = `
+                <td style="font-size:0.75rem; color:#64748B;">${l.timestamp ? l.timestamp.replace('T', ' ').slice(0, 16) : '--'}</td>
+                <td><strong>${l.user_name || l.user_id}</strong></td>
+                <td><span style="font-size:0.7rem;">${l.role}</span></td>
+                <td><code>${l.action}</code></td>
+                <td><span style="font-size:0.8rem;">${l.target_record || '--'}</span></td>
+                <td>${l.previous_value || '--'}</td>
+                <td>${l.new_value || '--'}</td>
+                <td><span class="badge-result ${isOverride ? 'overridden' : (isSuccess ? 'success' : 'denied')}">${l.result}</span></td>
+                <td><span style="font-size:0.75rem; color:#475569;">${l.reason || '--'}</span></td>
+            `;
+            tbody.appendChild(tr);
+        });
+    } catch (e) {
+        console.error("Failed to load audit logs", e);
+    }
+}
+
+// --------------------------------------------------------------------------
+// 10. PROFILE, PASSWORD & USER CREATION MODALS
+// --------------------------------------------------------------------------
+
+function openProfileModal() {
+    closeUserDropdown();
+    if (!window.currentUser) return;
+    const u = window.currentUser;
+
+    setText("modal-profile-name", u.full_name);
+    setText("modal-profile-role", u.role);
+    setText("modal-profile-id", u.id);
+    setText("modal-profile-email", u.email);
+    setText("modal-profile-emp-id", u.employee_id || "EMP-NAT-01");
+    setText("modal-profile-district", u.assigned_district_id || "Nationwide Scope");
+    setText("modal-profile-phc", u.assigned_phc_id || "All Facilities");
+
+    const avatar = document.getElementById("modal-profile-avatar");
+    if (avatar) avatar.innerText = u.full_name ? u.full_name.split(" ").map(n=>n[0]).join("").slice(0, 2) : "ME";
+
+    openModal("profile-modal");
+}
+
+function closeProfileModal() {
+    closeModal("profile-modal");
+}
+
+function openChangePasswordModal() {
+    closeUserDropdown();
+    openModal("change-password-modal");
+}
+
+function closeChangePasswordModal() {
+    closeModal("change-password-modal");
+}
+
+async function submitChangePassword() {
+    const oldP = document.getElementById("chg-old-pwd").value;
+    const newP = document.getElementById("chg-new-pwd").value;
+    const errDiv = document.getElementById("change-pwd-error");
+
+    try {
+        const res = await apiFetch("/api/auth/change-password", {
+            method: "POST",
+            body: JSON.stringify({ old_password: oldP, new_password: newP })
+        });
+        if (res.ok) {
+            closeChangePasswordModal();
+            showToast("Password updated successfully.", "success", "Security Updated");
+        } else {
+            if (errDiv) {
+                errDiv.style.display = "block";
+                errDiv.innerText = res.detail || "Failed to update password.";
+            }
+            showToast(res.detail || "Failed to update password.", "error");
+        }
+    } catch (e) {
+        showToast("Network error updating password.", "error");
     }
 }
 
 function openCreateUserModal() {
-    const modal = document.getElementById("create-user-modal");
-    if (!modal) return;
-    modal.classList.add("active");
-
-    const roleSelect = document.getElementById("new-user-role");
-    const distGroup = document.getElementById("new-user-district-group");
-    const phcGroup = document.getElementById("new-user-phc-group");
-
-    if (window.currentUser && window.currentUser.role === "DISTRICT_OFFICER") {
-        if (roleSelect) {
-            roleSelect.innerHTML = `<option value="PHC_STAFF">PHC Staff (Facility Operations)</option>`;
-        }
-        if (distGroup) distGroup.style.display = "none";
-        if (phcGroup) {
-            phcGroup.style.display = "block";
-            updateNewUserPhcOptions(window.currentUser.assigned_district_id);
-        }
-    } else {
-        if (roleSelect) {
-            roleSelect.innerHTML = `
-                <option value="DISTRICT_OFFICER">District Officer (District Administration)</option>
-                <option value="PHC_STAFF">PHC Staff (Facility Operations)</option>
-            `;
-        }
-        if (distGroup) distGroup.style.display = "block";
-        handleNewUserRoleChange("DISTRICT_OFFICER");
-    }
+    openModal("create-user-modal");
 }
 
 function closeCreateUserModal() {
-    const modal = document.getElementById("create-user-modal");
-    if (modal) modal.classList.remove("active");
+    closeModal("create-user-modal");
 }
 
 function handleNewUserRoleChange(role) {
     const phcGroup = document.getElementById("new-user-phc-group");
-    const distSelect = document.getElementById("new-user-district");
-    if (phcGroup) {
-        phcGroup.style.display = role === "PHC_STAFF" ? "block" : "none";
-    }
-    if (role === "PHC_STAFF" && distSelect) {
-        updateNewUserPhcOptions(distSelect.value);
-    }
-}
-
-function updateNewUserPhcOptions(districtId) {
-    const phcSelect = document.getElementById("new-user-phc");
-    if (!phcSelect) return;
-    phcSelect.innerHTML = "";
-
-    if (districtId === "DIST-NORTH") {
-        phcSelect.innerHTML = `
-            <option value="PHC-001">Alpha Sector PHC (PHC-001)</option>
-            <option value="PHC-002">Beta Central PHC (PHC-002)</option>
-        `;
-    } else {
-        phcSelect.innerHTML = `
-            <option value="PHC-003">Gamma Rural PHC (PHC-003)</option>
-            <option value="PHC-004">Delta Community PHC (PHC-004)</option>
-        `;
-    }
+    if (phcGroup) phcGroup.style.display = role === "PHC_STAFF" ? "block" : "none";
 }
 
 async function submitCreateUser() {
-    const name = document.getElementById("new-user-name").value.trim();
-    const email = document.getElementById("new-user-email").value.trim();
+    const name = document.getElementById("new-user-name").value;
+    const email = document.getElementById("new-user-email").value;
     const role = document.getElementById("new-user-role").value;
-    const district = document.getElementById("new-user-district") ? document.getElementById("new-user-district").value : null;
-    const phc = (role === "PHC_STAFF" && document.getElementById("new-user-phc")) ? document.getElementById("new-user-phc").value : null;
-    const tempPwd = document.getElementById("new-user-temp-pwd").value;
-    const errBox = document.getElementById("create-user-error");
-
-    if (!name || !email) {
-        if (errBox) {
-            errBox.innerText = "Name and official email are mandatory.";
-            errBox.style.display = "block";
-        }
-        return;
-    }
+    const dist = document.getElementById("new-user-district").value;
+    const phc = document.getElementById("new-user-phc").value;
+    const pwd = document.getElementById("new-user-temp-pwd").value;
 
     try {
-        const res = await fetch("/api/users", {
+        const res = await apiFetch("/api/users", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 full_name: name,
                 email: email,
                 role: role,
-                assigned_district_id: district,
-                assigned_phc_id: phc,
-                initial_password: tempPwd
+                assigned_district_id: dist,
+                assigned_phc_id: role === "PHC_STAFF" ? phc : null,
+                initial_password: pwd
             })
         });
-        const data = await res.json();
-        if (!res.ok) {
-            if (errBox) {
-                errBox.innerText = data.detail || "Account creation failed.";
-                errBox.style.display = "block";
-            }
-            return;
+        if (res.ok) {
+            closeCreateUserModal();
+            showToast("User account created successfully.", "success", "Account Provisioned");
+            await loadUserDirectory();
+        } else {
+            showToast(`Creation failed: ${res.detail}`, "error");
         }
-
-        alert(`[USER ACCOUNT CREATED]\n${data.message}`);
-        closeCreateUserModal();
-        loadUsersDirectory();
     } catch (e) {
-        if (errBox) {
-            errBox.innerText = "Network failure creating user.";
-            errBox.style.display = "block";
-        }
+        showToast("Network error creating user.", "error");
     }
 }
-
-// ==========================================================================
-// AUDIT LOGS PANEL
-// ==========================================================================
-let allLoadedAuditLogs = [];
-
-async function loadAuditLogs() {
-    const tbody = document.getElementById("audit-table-body");
-    const countLabel = document.getElementById("audit-count-label");
-    if (!tbody) return;
-
-    try {
-        const res = await fetch("/api/audit-logs?limit=100");
-        if (!res.ok) {
-            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--accent-rose);">Unauthorized to view audit logs.</td></tr>`;
-            return;
-        }
-        allLoadedAuditLogs = await res.json();
-        if (countLabel) countLabel.innerText = `Showing ${allLoadedAuditLogs.length} recent events`;
-        renderAuditTable(allLoadedAuditLogs);
-    } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--accent-rose);">Failed to retrieve audit trail.</td></tr>`;
-    }
-}
-
-function renderAuditTable(logs) {
-    const tbody = document.getElementById("audit-table-body");
-    if (!tbody) return;
-    tbody.innerHTML = "";
-
-    if (logs.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:24px;">No audit records found matching criteria.</td></tr>`;
-        return;
-    }
-
-    logs.forEach(log => {
-        const tr = document.createElement("tr");
-
-        let resBadge = `<span class="badge-result success">SUCCESS</span>`;
-        if (log.result === "OVERRIDDEN") resBadge = `<span class="badge-result overridden">OVERRIDDEN</span>`;
-        else if (log.result === "DENIED") resBadge = `<span class="badge-result denied">DENIED</span>`;
-        else if (log.result === "FAILURE") resBadge = `<span class="badge-result failure">FAILURE</span>`;
-
-        let scopeDisplay = "Global";
-        if (log.phc_scope) scopeDisplay = log.phc_scope;
-        else if (log.district_scope) scopeDisplay = log.district_scope;
-
-        tr.innerHTML = `
-            <td><span style="font-family:var(--font-mono); font-size:0.75rem;">${formatTime(log.timestamp)}</span></td>
-            <td>
-                <strong>${log.user_name || log.user_id}</strong><br>
-                <span style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">${log.role}</span>
-            </td>
-            <td><code>${log.action}</code></td>
-            <td style="font-size:0.8rem;">${log.target_record || "--"}</td>
-            <td><strong>${scopeDisplay}</strong></td>
-            <td>${resBadge}</td>
-            <td style="font-size:0.8rem; color:#475569; max-width:280px;">${log.reason || "--"}</td>
-        `;
-        tbody.appendChild(tr);
-    });
-}
-
-function filterAuditTable(type, btn) {
-    document.querySelectorAll("#audit-logs-panel .filter-pill").forEach(p => p.classList.remove("active"));
-    if (btn) btn.classList.add("active");
-
-    if (type === "ALL") {
-        renderAuditTable(allLoadedAuditLogs);
-    } else if (type === "LOGIN") {
-        renderAuditTable(allLoadedAuditLogs.filter(l => l.action.includes("LOGIN") || l.action.includes("LOGOUT")));
-    } else if (type === "OVERRIDDEN") {
-        renderAuditTable(allLoadedAuditLogs.filter(l => l.result === "OVERRIDDEN" || l.action.includes("OVERRIDE")));
-    } else if (type === "DENIED") {
-        renderAuditTable(allLoadedAuditLogs.filter(l => l.result === "DENIED" || l.result === "FAILURE"));
-    } else if (type === "TRANSFER") {
-        renderAuditTable(allLoadedAuditLogs.filter(l => l.action.includes("TRANSFER") || l.action.includes("REDIST")));
-    }
-}
-
-// ==========================================================================
-// ADMINISTRATIVE OVERRIDE MODAL
-// ==========================================================================
-function openOverrideModal(summaryText) {
-    const modal = document.getElementById("admin-override-modal");
-    const sumEl = document.getElementById("override-target-summary");
-    const reasonInput = document.getElementById("override-reason-input");
-    const confirmCheck = document.getElementById("override-confirm-checkbox");
-
-    if (sumEl) sumEl.innerText = summaryText || "Operational Modification";
-    if (reasonInput) reasonInput.value = "";
-    if (confirmCheck) confirmCheck.checked = false;
-    if (modal) modal.classList.add("active");
-}
-
-function closeOverrideModal() {
-    const modal = document.getElementById("admin-override-modal");
-    if (modal) modal.classList.remove("active");
-    pendingOverrideAction = null;
-}
-
-async function submitPendingOverride() {
-    const reason = document.getElementById("override-reason-input").value.trim();
-    const confirmed = document.getElementById("override-confirm-checkbox").checked;
-
-    if (!reason || reason.length < 3) {
-        alert("A written explanation is strictly mandatory for administrative overrides.");
-        return;
-    }
-    if (!confirmed) {
-        alert("You must check the confirmation box acknowledging this override.");
-        return;
-    }
-
-    const actionToRun = pendingOverrideAction;
-    closeOverrideModal();
-
-    if (actionToRun) {
-        await actionToRun(reason);
-    }
-}
-
-// ==========================================================================
-// CHANGE PASSWORD MODAL
-// ==========================================================================
-function openChangePasswordModal(isMandatory = false) {
-    const modal = document.getElementById("change-password-modal");
-    const alertBox = document.getElementById("must-change-pwd-alert");
-    const closeBtn = document.getElementById("change-pwd-close-btn");
-    const cancelBtn = document.getElementById("change-pwd-cancel-btn");
-    const errBox = document.getElementById("pwd-error-msg");
-
-    if (errBox) errBox.style.display = "none";
-
-    if (isMandatory) {
-        if (alertBox) alertBox.style.display = "block";
-        if (closeBtn) closeBtn.style.display = "none";
-        if (cancelBtn) cancelBtn.style.display = "none";
-    } else {
-        if (alertBox) alertBox.style.display = "none";
-        if (closeBtn) closeBtn.style.display = "block";
-        if (cancelBtn) cancelBtn.style.display = "block";
-    }
-
-    if (modal) modal.classList.add("active");
-}
-
-function closeChangePasswordModal() {
-    const modal = document.getElementById("change-password-modal");
-    if (modal) modal.classList.remove("active");
-}
-
-async function submitChangePassword() {
-    const oldP = document.getElementById("pwd-old").value;
-    const newP = document.getElementById("pwd-new").value;
-    const confirmP = document.getElementById("pwd-confirm").value;
-    const errBox = document.getElementById("pwd-error-msg");
-
-    if (errBox) errBox.style.display = "none";
-
-    if (!oldP || !newP) {
-        if (errBox) {
-            errBox.innerText = "All password fields are required.";
-            errBox.style.display = "block";
-        }
-        return;
-    }
-    if (newP.length < 6) {
-        if (errBox) {
-            errBox.innerText = "New password must be at least 6 characters long.";
-            errBox.style.display = "block";
-        }
-        return;
-    }
-    if (newP !== confirmP) {
-        if (errBox) {
-            errBox.innerText = "New passwords do not match.";
-            errBox.style.display = "block";
-        }
-        return;
-    }
-
-    try {
-        const res = await fetch("/api/auth/change-password", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ old_password: oldP, new_password: newP })
-        });
-        const data = await res.json();
-        if (!res.ok) {
-            if (errBox) {
-                errBox.innerText = data.detail || "Failed to change password.";
-                errBox.style.display = "block";
-            }
-            return;
-        }
-
-        alert("Password updated successfully!");
-        if (window.currentUser) window.currentUser.must_change_password = false;
-        closeChangePasswordModal();
-    } catch (e) {
-        if (errBox) {
-            errBox.innerText = "Network error updating password.";
-            errBox.style.display = "block";
-        }
-    }
-}
-
-// ==========================================================================
-// FORGOT & RESET PASSWORD (DEMO)
-// ==========================================================================
-let activeResetToken = "";
 
 function openForgotPasswordModal() {
-    const modal = document.getElementById("forgot-password-modal");
-    const resBox = document.getElementById("forgot-token-result");
-    const input = document.getElementById("forgot-email-input");
-    if (resBox) resBox.style.display = "none";
-    if (input) input.value = document.getElementById("login-username") ? document.getElementById("login-username").value : "";
-    if (modal) modal.classList.add("active");
+    openModal("forgot-password-modal");
 }
 
 function closeForgotPasswordModal() {
-    const modal = document.getElementById("forgot-password-modal");
-    if (modal) modal.classList.remove("active");
+    closeModal("forgot-password-modal");
 }
 
 async function submitForgotPasswordRequest() {
-    const email = document.getElementById("forgot-email-input").value.trim();
+    const email = document.getElementById("forgot-email-input").value;
     if (!email) {
-        alert("Please enter a registered email address.");
+        showToast("Please enter your official email address.", "warning");
         return;
     }
 
     try {
-        const res = await fetch("/api/auth/forgot-password", {
+        const res = await apiFetch("/api/auth/forgot-password", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email: email })
+            body: JSON.stringify({ email })
         });
-        const data = await res.json();
-        if (data.demo_reset_token) {
-            activeResetToken = data.demo_reset_token;
+        if (res.ok) {
+            const data = res.data;
             const resBox = document.getElementById("forgot-token-result");
-            const codeEl = document.getElementById("forgot-token-code");
-            if (codeEl) codeEl.innerText = activeResetToken;
-            if (resBox) resBox.style.display = "block";
+            const tokenCode = document.getElementById("forgot-token-code");
+            if (resBox && tokenCode) {
+                resBox.style.display = "block";
+                tokenCode.innerText = data.demo_token || "DEMO-RESET-TOKEN-XYZ";
+            }
+            showToast("Recovery token generated.", "success");
         } else {
-            alert(data.message);
+            showToast(`Reset request failed: ${res.detail}`, "error");
         }
     } catch (e) {
-        alert("Error requesting password recovery.");
+        showToast("Error requesting recovery token.", "error");
     }
 }
 
 async function submitResetPasswordWithToken() {
+    const token = document.getElementById("forgot-token-code").innerText;
     const newPwd = document.getElementById("forgot-new-pwd").value;
-    if (!newPwd || newPwd.length < 6) {
-        alert("Password must be at least 6 characters.");
-        return;
-    }
 
     try {
-        const res = await fetch("/api/auth/reset-password", {
+        const res = await apiFetch("/api/auth/reset-password", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token: activeResetToken, new_password: newPwd })
+            body: JSON.stringify({ token, new_password: newPwd })
         });
-        const data = await res.json();
-        if (!res.ok) {
-            alert(data.detail || "Password reset failed.");
-            return;
+        if (res.ok) {
+            closeForgotPasswordModal();
+            showToast("Password reset successfully. You may now sign in.", "success", "Password Reset");
+        } else {
+            showToast(`Reset failed: ${res.detail || 'Invalid or expired token.'}`, "error");
         }
-        alert(data.message);
-        closeForgotPasswordModal();
     } catch (e) {
-        alert("Network error resetting password.");
+        showToast("Network error resetting password.", "error");
     }
 }
 
-// ==========================================================================
-// PROFILE MODAL
-// ==========================================================================
-function openProfileModal() {
-    const modal = document.getElementById("profile-modal");
-    const u = window.currentUser;
-    if (!u || !modal) return;
+// --------------------------------------------------------------------------
+// UTILITY FUNCTIONS
+// --------------------------------------------------------------------------
 
-    document.getElementById("modal-profile-name").innerText = u.full_name;
-    document.getElementById("modal-profile-avatar").innerText = u.full_name ? u.full_name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase() : "MD";
-    document.getElementById("modal-profile-role").innerText = u.role.replace("_", " ");
-    document.getElementById("modal-profile-id").innerText = u.id;
-    document.getElementById("modal-profile-email").innerText = u.email;
-    document.getElementById("modal-profile-emp-id").innerText = u.employee_id || "--";
-    document.getElementById("modal-profile-district").innerText = u.assigned_district_id || "All Districts (National)";
-    document.getElementById("modal-profile-phc").innerText = u.assigned_phc_id || "All Facilities (National/District)";
-    document.getElementById("modal-profile-last-login").innerText = u.last_login ? formatTime(u.last_login) : "Just now";
-
-    modal.classList.add("active");
+function setText(id, text) {
+    const el = document.getElementById(id);
+    if (el) el.innerText = text;
 }
-
-function closeProfileModal() {
-    const modal = document.getElementById("profile-modal");
-    if (modal) modal.classList.remove("active");
-}
-
-
-

@@ -2,7 +2,8 @@ import requests
 import json
 import sys
 
-BASE_URL = "http://127.0.0.1:8000"
+import os
+BASE_URL = os.environ.get("MERIDIAN_BASE_URL", "http://127.0.0.1:8080")
 
 def run_tests():
     print("================================================================")
@@ -177,6 +178,115 @@ def run_tests():
                 "Audit log includes user authentications")
 
     # -------------------------------------------------------------
+    # 8. Redistribution Lifecycle & Dual Inventory Reconciliation
+    # -------------------------------------------------------------
+    print("\n--- 8. REDISTRIBUTION 10-STEP LIFECYCLE & INVENTORY RECONCILIATION ---")
+    s_beta, res_beta = login("staff.beta@meridian.health", "Staff@123")
+    
+    # Check baseline inventory before transfer
+    r_beta_inv = s_beta.get(f"{BASE_URL}/api/inventory")
+    beta_med = next((m for m in r_beta_inv.json() if m["medicine_name"] == "Paracetamol 500mg"), None)
+    beta_initial_qty = beta_med["quantity"] if beta_med else 280
+
+    r_alpha_inv = s_alpha.get(f"{BASE_URL}/api/inventory")
+    alpha_med = next((m for m in r_alpha_inv.json() if m["medicine_name"] == "Paracetamol 500mg"), None)
+    alpha_initial_qty = alpha_med["quantity"] if alpha_med else 25
+
+    # 8.1 PHC Staff Alpha requests 20 units of Paracetamol from Beta
+    r_req = s_alpha.post(f"{BASE_URL}/api/redistribution/request", json={
+        "medicine_name": "Paracetamol 500mg",
+        "quantity": 20,
+        "urgency": "URGENT",
+        "reason": "Sudden seasonal febrile outpatient surge"
+    })
+    assert_test(r_req.status_code == 200 and r_req.json().get("transfer_id") is not None,
+                "PHC Staff creates redistribution request with status 'Requested'")
+    new_tr_id = r_req.json().get("transfer_id")
+
+    # 8.2 PHC Staff attempting to approve transfer -> 403 Forbidden
+    r_self_approve = s_alpha.post(f"{BASE_URL}/api/redistribution/{new_tr_id}/review", json={"action": "APPROVE"})
+    assert_test(r_self_approve.status_code == 403, "PHC Staff cannot self-approve transfer request (returns 403)")
+
+    # 8.3 Safe Stock Protection: Approving excessive quantity that pushes donor below safe par level
+    r_unsafe_review = s_onorth.post(f"{BASE_URL}/api/redistribution/{new_tr_id}/review", json={
+        "action": "MODIFY_AND_APPROVE",
+        "modified_quantity": 250, # Beta has 280, par level is 100, so 280 - 250 = 30 < 100 par!
+        "decision_reason": "Attempted excessive allocation"
+    })
+    assert_test(r_unsafe_review.status_code == 400,
+                "Safe Stock Rule: Transfer reducing donor below par level is rejected with 400")
+
+    # 8.4 District Officer approves safe quantity (20 units)
+    r_safe_approve = s_onorth.post(f"{BASE_URL}/api/redistribution/{new_tr_id}/review", json={
+        "action": "APPROVE",
+        "decision_reason": "Verified donor holds safe surplus above par"
+    })
+    assert_test(r_safe_approve.status_code == 200 and r_safe_approve.json()["transfer_status"] == "Approved",
+                "District Officer approves transfer; status transitions to 'Approved'")
+
+    # 8.5 Donor PHC Beta confirms dispatch
+    r_dispatch = s_beta.post(f"{BASE_URL}/api/redistribution/{new_tr_id}/dispatch", json={
+        "batch_number": "BAT-PCM-2026", "notes": "Handed to courier van"
+    })
+    assert_test(r_dispatch.status_code == 200 and r_dispatch.json()["transfer_status"] == "In Transit",
+                "Donor PHC Beta confirms dispatch; status transitions to 'In Transit'")
+
+    # 8.6 Recipient PHC Alpha confirms delivery -> Dual Inventory Reconciliation
+    r_deliver = s_alpha.post(f"{BASE_URL}/api/redistribution/{new_tr_id}/deliver", json={
+        "received_quantity": 20, "notes": "Delivery verified, batch inspected"
+    })
+    assert_test(r_deliver.status_code == 200 and r_deliver.json()["transfer_status"] == "Completed",
+                "Recipient PHC confirms delivery; transfer status marked 'Completed'")
+
+    # 8.7 Verify real-time database balances on both facilities
+    r_beta_after = s_beta.get(f"{BASE_URL}/api/inventory")
+    beta_after_med = next((m for m in r_beta_after.json() if m["medicine_name"] == "Paracetamol 500mg"), None)
+    beta_final_qty = beta_after_med["quantity"] if beta_after_med else 0
+
+    r_alpha_after = s_alpha.get(f"{BASE_URL}/api/inventory")
+    alpha_after_med = next((m for m in r_alpha_after.json() if m["medicine_name"] == "Paracetamol 500mg"), None)
+    alpha_final_qty = alpha_after_med["quantity"] if alpha_after_med else 0
+
+    assert_test(beta_final_qty == beta_initial_qty - 20 and alpha_final_qty == alpha_initial_qty + 20,
+                f"Dual Inventory Reconciliation: Donor deducted 20 ({beta_initial_qty}->{beta_final_qty}), Recipient added 20 ({alpha_initial_qty}->{alpha_final_qty})")
+
+    # -------------------------------------------------------------
+    # 9. Official Communication & Acknowledgement Desk
+    # -------------------------------------------------------------
+    print("\n--- 9. OFFICIAL DIRECTIVES & ACKNOWLEDGEMENT DESK ---")
+    # National Admin sends directive
+    r_send_msg = s_admin.post(f"{BASE_URL}/api/messages", json={
+        "recipient_role": "DISTRICT_OFFICER",
+        "district_id": "DIST-NORTH",
+        "subject": "Mandatory Monsoon Supply Chain Audit",
+        "message": "Inspect emergency cold-chain and ORS buffers across all primary nodes.",
+        "priority": "URGENT"
+    })
+    assert_test(r_send_msg.status_code == 200 and r_send_msg.json().get("message_id") is not None,
+                "National Admin sends official directive to District Officer")
+    msg_id = r_send_msg.json()["message_id"]
+
+    # District Officer North retrieves messages
+    r_get_msgs = s_onorth.get(f"{BASE_URL}/api/messages")
+    msg_ids = [m["id"] for m in r_get_msgs.json()["messages"]]
+    assert_test(msg_id in msg_ids, "District Officer North retrieves new directive in official inbox")
+
+    # District Officer signs acknowledgement
+    r_ack = s_onorth.post(f"{BASE_URL}/api/messages/{msg_id}/acknowledge", json={
+        "notes": "Directives disseminated to all facility officers."
+    })
+    assert_test(r_ack.status_code == 200, "District Officer signs directive acknowledgement with timestamp")
+
+    # -------------------------------------------------------------
+    # 10. Operational Discipline Indicators
+    # -------------------------------------------------------------
+    print("\n--- 10. OPERATIONAL DISCIPLINE & ACCOUNTABILITY ---")
+    r_disc = s_onorth.get(f"{BASE_URL}/api/accountability/indicators")
+    ind = r_disc.json().get("discipline_indicators", {})
+    assert_test(r_disc.status_code == 200 and "late_attendance_count" in ind and "critical_stockouts_count" in ind,
+                "Operational discipline indicators endpoint returns calculated compliance counts")
+
+    # -------------------------------------------------------------
     # Summary
     # -------------------------------------------------------------
     print("\n================================================================")
@@ -190,3 +300,4 @@ def run_tests():
 if __name__ == "__main__":
     success = run_tests()
     sys.exit(0 if success else 1)
+

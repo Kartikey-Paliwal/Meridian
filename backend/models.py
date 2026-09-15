@@ -63,13 +63,25 @@ class InventoryUpdate(BaseModel):
     override_reason: Optional[str] = None # Required if performed by National Admin
 
 class BedStatusUpdate(BaseModel):
-    phc_id: str
-    total_beds: int
-    occupied_beds: int
+    phc_id: Optional[str] = None
+    total_beds: int = Field(..., ge=0)
+    occupied_beds: int = Field(..., ge=0)
+    notes: Optional[str] = None
     override_reason: Optional[str] = None # Required if performed by National Admin
 
+class EquipmentUpdate(BaseModel):
+    phc_id: Optional[str] = None
+    equipment_id: Optional[int] = None
+    name: str
+    category: Optional[str] = "General"
+    quantity: int = Field(..., ge=0)
+    operational_status: str = Field("OPERATIONAL", description="OPERATIONAL, UNDER_MAINTENANCE, CRITICAL_DEFICIT, STANDBY")
+    under_maintenance_count: int = Field(0, ge=0)
+    notes: Optional[str] = None
+    override_reason: Optional[str] = None
+
 class StaffAttendanceCreate(BaseModel):
-    phc_id: str
+    phc_id: Optional[str] = None
     staff_id: str
     staff_name: Optional[str] = None
     role: Optional[str] = None
@@ -94,16 +106,21 @@ class CardPunchRequest(BaseModel):
 
 class StaffActionRequest(BaseModel):
     staff_id: str
-    action: str  # "CHECK_OUT", "CHECK_IN", "MARK_LEAVE", "MARK_ABSENT"
+    action: str  # "CHECK_OUT", "CHECK_IN", "MARK_LEAVE", "MARK_ABSENT", "CORRECTION"
     phc_id: Optional[str] = "PHC-001"
     remarks: Optional[str] = None
     operator: Optional[str] = "Supervisor Override"
     override_reason: Optional[str] = None
 
 class PatientFootfallCreate(BaseModel):
-    phc_id: str
+    phc_id: Optional[str] = None
     date: str
-    count: int
+    count: int = Field(..., ge=0)
+    male_count: Optional[int] = Field(0, ge=0)
+    female_count: Optional[int] = Field(0, ge=0)
+    other_count: Optional[int] = Field(0, ge=0)
+    emergency_cases: Optional[int] = Field(0, ge=0)
+    correction_reason: Optional[str] = None
     override_reason: Optional[str] = None
 
 # Action model for Human-in-the-loop Redistribution
@@ -115,3 +132,83 @@ class TransferActionRequest(BaseModel):
     quantity: int
     action: str  # "APPROVE" or "REJECT" or "OVERRIDE"
     decision_reason: Optional[str] = None
+
+# ---------------------------------------------------------
+# 10-STEP REDISTRIBUTION LIFECYCLE SCHEMAS
+# ---------------------------------------------------------
+
+class TransferCreateRequest(BaseModel):
+    medicine_name: str
+    quantity: int = Field(..., gt=0)
+    urgency: str = "NORMAL"  # "NORMAL", "URGENT", "CRITICAL"
+    reason: Optional[str] = None
+    donor_phc: Optional[str] = None  # Optional: specific donor or let system match
+    target_phc: Optional[str] = None
+    phc_id: Optional[str] = None
+    required_by: Optional[str] = None
+    notes: Optional[str] = None
+
+class TransferReviewRequest(BaseModel):
+    action: str  # "APPROVE", "MODIFY_AND_APPROVE", "REJECT"
+    modified_quantity: Optional[int] = None
+    alternative_donor_phc: Optional[str] = None
+    decision_reason: Optional[str] = None
+
+class TransferDispatchConfirmRequest(BaseModel):
+    notes: Optional[str] = None
+    batch_number: Optional[str] = None
+
+class TransferDeliverConfirmRequest(BaseModel):
+    received_quantity: Optional[int] = None
+    notes: Optional[str] = None
+
+class TransferEscalateRequest(BaseModel):
+    reason: str = Field(..., min_length=3)
+
+# ---------------------------------------------------------
+# OFFICIAL COMMUNICATION & NOTIFICATION SCHEMAS
+# ---------------------------------------------------------
+
+class SendMessageRequest(BaseModel):
+    recipient_role: Optional[str] = None  # "DISTRICT_OFFICER", "PHC_STAFF", "NATIONAL_ADMIN", "ALL"
+    recipient_id: Optional[str] = None
+    district_id: Optional[str] = None
+    phc_id: Optional[str] = None
+    transfer_id: Optional[int] = None
+    subject: str = Field(..., min_length=2)
+    message: str = Field(..., min_length=2)
+    priority: str = "NORMAL"  # "NORMAL", "URGENT", "EMERGENCY"
+
+class AcknowledgeMessageRequest(BaseModel):
+    notes: Optional[str] = None
+
+# ---------------------------------------------------------
+# FAST PHC OPERATIONAL ENTRY SCHEMAS
+# ---------------------------------------------------------
+
+class StockReceivedRequest(BaseModel):
+    phc_id: Optional[str] = None
+    medicine_name: str
+    quantity: int = Field(..., gt=0)
+    batch_number: Optional[str] = None
+    expiry_date: Optional[str] = None
+    supplier: Optional[str] = "District Central Medical Depot"
+    received_date: Optional[str] = None
+    notes: Optional[str] = None
+    override_reason: Optional[str] = None
+
+class StockConsumedRequest(BaseModel):
+    phc_id: Optional[str] = None
+    medicine_name: str
+    quantity: int = Field(..., gt=0)
+    reason: Optional[str] = "Routine Dispensation"
+    date: Optional[str] = None
+    notes: Optional[str] = None
+    override_reason: Optional[str] = None
+
+# Backward-compatible and semantic alias
+class StockDispensedRequest(StockConsumedRequest):
+    pass
+
+
+

@@ -107,6 +107,8 @@ def init_db():
         timestamp TEXT NOT NULL,
         result TEXT NOT NULL,
         reason TEXT,
+        previous_value TEXT,
+        new_value TEXT,
         details TEXT
     );
     """)
@@ -201,7 +203,7 @@ def init_db():
     );
     """)
 
-    # 12. redistribution_transfers table
+    # 12. redistribution_transfers table (10-step lifecycle workflow)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS redistribution_transfers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -211,13 +213,84 @@ def init_db():
         target_district_id TEXT,
         medicine_name TEXT NOT NULL,
         quantity INTEGER NOT NULL,
-        eta_mins INTEGER NOT NULL,
-        status TEXT NOT NULL DEFAULT 'PENDING',
+        eta_mins INTEGER NOT NULL DEFAULT 30,
+        urgency TEXT NOT NULL DEFAULT 'NORMAL',
+        status TEXT NOT NULL DEFAULT 'Requested',
         underlying_numbers TEXT,
+        requested_by TEXT,
+        requested_at TEXT,
         approved_by TEXT,
+        approved_at TEXT,
         decision_reason TEXT,
+        dispatched_by TEXT,
+        dispatched_at TEXT,
+        delivered_by TEXT,
+        delivered_at TEXT,
+        completed_at TEXT,
+        delay_reason TEXT,
+        is_escalated INTEGER DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT
+    );
+    """)
+
+    # 13. messages table (Official communication & notification desk)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sender_id TEXT NOT NULL,
+        sender_name TEXT NOT NULL,
+        sender_role TEXT NOT NULL,
+        recipient_role TEXT,
+        recipient_id TEXT,
+        district_id TEXT,
+        phc_id TEXT,
+        transfer_id INTEGER,
+        subject TEXT NOT NULL,
+        message TEXT NOT NULL,
+        priority TEXT NOT NULL DEFAULT 'NORMAL',
+        sent_at TEXT NOT NULL,
+        read_at TEXT,
+        acknowledged_at TEXT,
+        acknowledged_by TEXT,
+        acknowledgement_notes TEXT
+    );
+    """)
+
+    # 14. stock_transactions table (Immutably records inventory changes)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS stock_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        phc_id TEXT NOT NULL,
+        district_id TEXT,
+        medicine_name TEXT NOT NULL,
+        transaction_type TEXT NOT NULL, -- 'RECEIVED' or 'DISPENSED'
+        quantity INTEGER NOT NULL,
+        batch_number TEXT,
+        expiry_date TEXT,
+        supplier_source TEXT,
+        reason_usage TEXT,
+        notes TEXT,
+        transaction_date TEXT NOT NULL,
+        created_by TEXT,
+        created_at TEXT NOT NULL
+    );
+    """)
+
+    # 15. facility_equipment table (Ward resources & equipment tracking)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS facility_equipment (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        phc_id TEXT NOT NULL,
+        district_id TEXT,
+        name TEXT NOT NULL,
+        category TEXT NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 1,
+        operational_status TEXT NOT NULL DEFAULT 'OPERATIONAL', -- 'OPERATIONAL', 'UNDER_MAINTENANCE', 'CRITICAL_DEFICIT', 'STANDBY'
+        under_maintenance_count INTEGER NOT NULL DEFAULT 0,
+        notes TEXT,
+        updated_at TEXT NOT NULL,
+        UNIQUE(phc_id, name)
     );
     """)
 
@@ -234,18 +307,37 @@ def init_db():
         if "district_id" not in cols:
             cursor.execute(f"ALTER TABLE {tbl} ADD COLUMN district_id TEXT")
 
+    # Migrate audit_logs columns
+    cursor.execute("PRAGMA table_info(audit_logs)")
+    al_cols = [c[1] for c in cursor.fetchall()]
+    if "previous_value" not in al_cols:
+        cursor.execute("ALTER TABLE audit_logs ADD COLUMN previous_value TEXT")
+    if "new_value" not in al_cols:
+        cursor.execute("ALTER TABLE audit_logs ADD COLUMN new_value TEXT")
+
+    # Migrate redistribution_transfers columns
     cursor.execute("PRAGMA table_info(redistribution_transfers)")
     rt_cols = [c[1] for c in cursor.fetchall()]
-    if "source_district_id" not in rt_cols:
-        cursor.execute("ALTER TABLE redistribution_transfers ADD COLUMN source_district_id TEXT")
-    if "target_district_id" not in rt_cols:
-        cursor.execute("ALTER TABLE redistribution_transfers ADD COLUMN target_district_id TEXT")
-    if "approved_by" not in rt_cols:
-        cursor.execute("ALTER TABLE redistribution_transfers ADD COLUMN approved_by TEXT")
-    if "decision_reason" not in rt_cols:
-        cursor.execute("ALTER TABLE redistribution_transfers ADD COLUMN decision_reason TEXT")
-    if "updated_at" not in rt_cols:
-        cursor.execute("ALTER TABLE redistribution_transfers ADD COLUMN updated_at TEXT")
+    for col_name, col_type in [
+        ("source_district_id", "TEXT"),
+        ("target_district_id", "TEXT"),
+        ("urgency", "TEXT DEFAULT 'NORMAL'"),
+        ("requested_by", "TEXT"),
+        ("requested_at", "TEXT"),
+        ("approved_by", "TEXT"),
+        ("approved_at", "TEXT"),
+        ("decision_reason", "TEXT"),
+        ("dispatched_by", "TEXT"),
+        ("dispatched_at", "TEXT"),
+        ("delivered_by", "TEXT"),
+        ("delivered_at", "TEXT"),
+        ("completed_at", "TEXT"),
+        ("delay_reason", "TEXT"),
+        ("is_escalated", "INTEGER DEFAULT 0"),
+        ("updated_at", "TEXT")
+    ]:
+        if col_name not in rt_cols:
+            cursor.execute(f"ALTER TABLE redistribution_transfers ADD COLUMN {col_name} {col_type}")
 
     # Migrate staff_attendance columns if missing
     cursor.execute("PRAGMA table_info(staff_attendance)")
@@ -260,6 +352,29 @@ def init_db():
     ]:
         if col_name not in sa_cols:
             cursor.execute(f"ALTER TABLE staff_attendance ADD COLUMN {col_name} {col_type}")
+
+    # Migrate patient_footfall columns if missing
+    cursor.execute("PRAGMA table_info(patient_footfall)")
+    pf_cols = [c[1] for c in cursor.fetchall()]
+    for col_name, col_type in [
+        ("male_count", "INTEGER DEFAULT 0"),
+        ("female_count", "INTEGER DEFAULT 0"),
+        ("other_count", "INTEGER DEFAULT 0"),
+        ("emergency_cases", "INTEGER DEFAULT 0"),
+        ("correction_reason", "TEXT"),
+        ("updated_at", "TEXT")
+    ]:
+        if col_name not in pf_cols:
+            cursor.execute(f"ALTER TABLE patient_footfall ADD COLUMN {col_name} {col_type}")
+
+    # Migrate bed_status columns if missing
+    cursor.execute("PRAGMA table_info(bed_status)")
+    bs_cols = [c[1] for c in cursor.fetchall()]
+    if "notes" not in bs_cols:
+        cursor.execute("ALTER TABLE bed_status ADD COLUMN notes TEXT")
+
+    # Ensure unique index on facility_equipment for idempotent seeding
+    cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_facility_equipment_phc_name ON facility_equipment (phc_id, name)")
 
     # Backfill district_id in operational tables based on phc_id
     cursor.execute("UPDATE medicine_inventory SET district_id = 'DIST-NORTH' WHERE phc_id IN ('PHC-001', 'PHC-002') AND (district_id IS NULL OR district_id = '')")
@@ -296,6 +411,12 @@ def init_db():
     cursor.execute("SELECT COUNT(*) FROM staff_members")
     if cursor.fetchone()[0] == 0:
         seed_staff_members(cursor)
+        conn.commit()
+
+    # Seed facility equipment
+    cursor.execute("SELECT COUNT(*) FROM facility_equipment")
+    if cursor.fetchone()[0] == 0:
+        seed_facility_equipment(cursor)
         conn.commit()
 
     conn.close()
@@ -559,6 +680,30 @@ def seed_staff_members(cursor):
         ))
 
 
+def seed_facility_equipment(cursor):
+    today = datetime.now().isoformat()
+    phcs = [
+        ("PHC-001", "DIST-NORTH"),
+        ("PHC-002", "DIST-NORTH"),
+        ("PHC-003", "DIST-SOUTH"),
+        ("PHC-004", "DIST-SOUTH"),
+    ]
+    eq_templates = [
+        ("Central Medical Oxygen Cylinders", "Respiratory Support", 6, "OPERATIONAL", 0, "6x 40L manifold cylinders connected"),
+        ("Emergency Ambulance Van (DL-01-AMB)", "Emergency Transport", 1, "OPERATIONAL", 0, "Stationed on standby at Gate 2"),
+        ("Neonatal Radiant Warmer (Zone B)", "Maternal & Child Health", 1, "OPERATIONAL", 0, "Calibrated and functional in triage"),
+        ("Diesel Generator Fuel Level (Reserve)", "Power Backup", 1, "OPERATIONAL", 0, "68% Capacity - 72-hour fuel buffer maintained"),
+    ]
+    for p_id, d_id in phcs:
+        for name, cat, qty, status, maint_count, notes in eq_templates:
+            cursor.execute("""
+            INSERT OR IGNORE INTO facility_equipment (
+                phc_id, district_id, name, category, quantity, 
+                operational_status, under_maintenance_count, notes, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (p_id, d_id, name, cat, qty, status, maint_count, notes, today))
+
+
 def seed_initial_data(cursor):
     today = datetime.now()
 
@@ -620,3 +765,111 @@ def seed_initial_data(cursor):
             INSERT OR REPLACE INTO patient_footfall (phc_id, district_id, date, count)
             VALUES (?, ?, ?, ?)
             """, (p_id, d_id, day_date, c))
+
+    # 4. Seed Redistribution Transfers
+    now_iso = today.isoformat()
+    two_hours_ago = (today - timedelta(hours=2)).isoformat()
+    four_hours_ago = (today - timedelta(hours=4)).isoformat()
+    yesterday_iso = (today - timedelta(days=1)).isoformat()
+
+    cursor.execute("SELECT COUNT(*) FROM redistribution_transfers")
+    if cursor.fetchone()[0] == 0:
+        seed_transfers = [
+            # 1. Critical shortage request pending review
+            (
+                "PHC-002", "PHC-001", "DIST-NORTH", "DIST-NORTH",
+                "ORS Packets", 60, 25, "CRITICAL", "Requested",
+                json.dumps({"source_surplus": 220, "target_deficit": 85}),
+                "staff.alpha@meridian.health", two_hours_ago,
+                None, None, None,
+                None, None, None, None, None, None, 0,
+                two_hours_ago, two_hours_ago
+            ),
+            # 2. Approved transfer currently in transit (slightly delayed past ETA to demo accountability indicators)
+            (
+                "PHC-002", "PHC-001", "DIST-NORTH", "DIST-NORTH",
+                "Paracetamol 500mg", 40, 20, "HIGH", "In Transit",
+                json.dumps({"source_surplus": 180, "target_deficit": 75}),
+                "staff.alpha@meridian.health", four_hours_ago,
+                "officer.north@meridian.health", (today - timedelta(hours=3, minutes=30)).isoformat(),
+                "Approved emergency redistribution from Beta surplus",
+                "staff.beta@meridian.health", (today - timedelta(hours=2, minutes=45)).isoformat(),
+                None, None, None, "Route slowdown due to road work", 1,
+                four_hours_ago, (today - timedelta(hours=2, minutes=45)).isoformat()
+            ),
+            # 3. Completed transfer from yesterday
+            (
+                "PHC-002", "PHC-001", "DIST-NORTH", "DIST-NORTH",
+                "Amoxicillin 250mg", 30, 30, "NORMAL", "Completed",
+                json.dumps({"source_surplus": 150, "target_deficit": 50}),
+                "staff.alpha@meridian.health", yesterday_iso,
+                "officer.north@meridian.health", yesterday_iso,
+                "Routine stock balancing approval",
+                "staff.beta@meridian.health", yesterday_iso,
+                "staff.alpha@meridian.health", yesterday_iso,
+                yesterday_iso, None, 0,
+                yesterday_iso, yesterday_iso
+            )
+        ]
+        for tr in seed_transfers:
+            cursor.execute("""
+            INSERT INTO redistribution_transfers (
+                source_phc, target_phc, source_district_id, target_district_id,
+                medicine_name, quantity, eta_mins, urgency, status,
+                underlying_numbers, requested_by, requested_at,
+                approved_by, approved_at, decision_reason,
+                dispatched_by, dispatched_at, delivered_by, delivered_at,
+                completed_at, delay_reason, is_escalated, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, tr)
+
+    # 5. Seed Messages (Official Communication Desk)
+    cursor.execute("SELECT COUNT(*) FROM messages")
+    if cursor.fetchone()[0] == 0:
+        seed_messages = [
+            # 1. National Admin -> District Officers (Acknowledged by Dist-North, Pending by Dist-South)
+            (
+                "admin@meridian.health", "Dr. Ananya Sharma", "NATIONAL_ADMIN",
+                "DISTRICT_OFFICER", None, "DIST-NORTH", None, None,
+                "URGENT: Monsoon Epidemic Preparedness & ORS Buffer Stocking",
+                "All District Officers must verify buffer stocks of ORS, Chlorine tablets, and IV fluids across vulnerable riverine PHCs. Ensure daily reporting sync by 17:00.",
+                "URGENT", four_hours_ago, (today - timedelta(hours=3)).isoformat(),
+                (today - timedelta(hours=3)).isoformat(), "Rajesh Kumar",
+                "Acknowledged and directives forwarded to all North district facilities."
+            ),
+            (
+                "admin@meridian.health", "Dr. Ananya Sharma", "NATIONAL_ADMIN",
+                "DISTRICT_OFFICER", None, "DIST-SOUTH", None, None,
+                "URGENT: Monsoon Epidemic Preparedness & ORS Buffer Stocking",
+                "All District Officers must verify buffer stocks of ORS, Chlorine tablets, and IV fluids across vulnerable riverine PHCs. Ensure daily reporting sync by 17:00.",
+                "URGENT", four_hours_ago, None,
+                None, None, None
+            ),
+            # 2. District Officer North -> PHC-001 Staff (Action Required)
+            (
+                "officer.north@meridian.health", "Rajesh Kumar", "DISTRICT_OFFICER",
+                "PHC_STAFF", None, "DIST-NORTH", "PHC-001", 1,
+                "ACTION REQUIRED: Confirm receipt & inspect batch seal for ORS transfer",
+                "Transfer #1 has been approved and dispatch initiated from PHC-002 Beta. Confirm physical receipt and batch integrity immediately upon arrival.",
+                "URGENT", two_hours_ago, (today - timedelta(hours=1, minutes=30)).isoformat(),
+                None, None, None
+            ),
+            # 3. PHC-001 Staff -> District Officer North
+            (
+                "staff.alpha@meridian.health", "Sunita Verma", "PHC_STAFF",
+                "DISTRICT_OFFICER", "officer.north@meridian.health", "DIST-NORTH", "PHC-001", None,
+                "Reporting: Elevated OPD Footfall & Paediatric Dehydration Inflow",
+                "Observed 35% surge in paediatric diarrhoeal presentations since morning shift. Rapid diagnostic kits currently adequate, but ORS sachet reserves are critical.",
+                "HIGH", (today - timedelta(hours=1)).isoformat(), (today - timedelta(minutes=40)).isoformat(),
+                (today - timedelta(minutes=35)).isoformat(), "Rajesh Kumar",
+                "Noted. Expedited Beta transfer and alerted mobile supply van."
+            )
+        ]
+        for msg in seed_messages:
+            cursor.execute("""
+            INSERT INTO messages (
+                sender_id, sender_name, sender_role, recipient_role, recipient_id,
+                district_id, phc_id, transfer_id, subject, message, priority,
+                sent_at, read_at, acknowledged_at, acknowledged_by, acknowledgement_notes
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, msg)

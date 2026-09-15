@@ -21,10 +21,13 @@ def log_audit_event(
     phc_scope: Optional[str] = None,
     result: str = "SUCCESS",
     reason: Optional[str] = None,
+    previous_value: Optional[str] = None,
+    new_value: Optional[str] = None,
     details: Optional[Dict[str, Any]] = None
 ):
     """
     Persists a structured audit trail event.
+    Captures actor, role, district, PHC, action, previous value, new value, reason, timestamp, and result.
     Automatically scrubs passwords, tokens, and secret keys from details before writing.
     """
     try:
@@ -42,8 +45,9 @@ def log_audit_event(
         cursor.execute("""
         INSERT INTO audit_logs (
             user_id, user_name, role, action, target_record, 
-            district_scope, phc_scope, timestamp, result, reason, details
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            district_scope, phc_scope, timestamp, result, reason,
+            previous_value, new_value, details
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             user_id,
             user_name or "Unknown",
@@ -55,6 +59,8 @@ def log_audit_event(
             datetime.now().isoformat(),
             result,
             reason,
+            str(previous_value) if previous_value is not None else None,
+            str(new_value) if new_value is not None else None,
             json.dumps(clean_details) if clean_details else None
         ))
         conn.commit()

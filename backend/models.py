@@ -1,18 +1,72 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, EmailStr
 from typing import List, Optional, Dict, Any
 
-# Medicine Inventory CRUD Models
+# ---------------------------------------------------------
+# AUTHENTICATION & USER MANAGEMENT SCHEMAS
+# ---------------------------------------------------------
+
+class LoginRequest(BaseModel):
+    username: str = Field(..., description="Email, Employee ID, or username alias")
+    password: str = Field(..., min_length=1)
+    remember_me: bool = False
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str = Field(..., min_length=6)
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(..., min_length=6)
+
+class CreateUserRequest(BaseModel):
+    full_name: str
+    email: str
+    employee_id: Optional[str] = None
+    role: str # "DISTRICT_OFFICER" or "PHC_STAFF"
+    assigned_district_id: Optional[str] = None
+    assigned_phc_id: Optional[str] = None
+    initial_password: Optional[str] = "Meridian@2026"
+
+class UpdateUserStatusRequest(BaseModel):
+    account_status: str # "ACTIVE" or "DISABLED"
+
+class UserResponse(BaseModel):
+    id: str
+    full_name: str
+    email: str
+    employee_id: Optional[str] = None
+    role: str
+    account_status: str
+    assigned_district_id: Optional[str] = None
+    assigned_phc_id: Optional[str] = None
+    must_change_password: bool
+    last_login: Optional[str] = None
+    created_at: str
+
+class AdminOverrideRequest(BaseModel):
+    reason: str = Field(..., min_length=3, description="Mandatory audit justification for operational override")
+    confirm: bool = True
+
+# ---------------------------------------------------------
+# OPERATIONAL SCHEMAS (WITH OVERRIDE & SCOPING SUPPORT)
+# ---------------------------------------------------------
+
 class InventoryUpdate(BaseModel):
     phc_id: str
     medicine_name: str
     quantity: int
     par_level: Optional[int] = 100
-    daily_consumption: Optional[int] = None # Optional incremental usage log
+    daily_consumption: Optional[int] = None
+    override_reason: Optional[str] = None # Required if performed by National Admin
 
 class BedStatusUpdate(BaseModel):
     phc_id: str
     total_beds: int
     occupied_beds: int
+    override_reason: Optional[str] = None # Required if performed by National Admin
 
 class StaffAttendanceCreate(BaseModel):
     phc_id: str
@@ -30,6 +84,7 @@ class StaffAttendanceCreate(BaseModel):
     punch_in_time: Optional[str] = None
     punch_out_time: Optional[str] = None
     date: Optional[str] = None
+    override_reason: Optional[str] = None
 
 class CardPunchRequest(BaseModel):
     card_uid: str
@@ -43,11 +98,13 @@ class StaffActionRequest(BaseModel):
     phc_id: Optional[str] = "PHC-001"
     remarks: Optional[str] = None
     operator: Optional[str] = "Supervisor Override"
+    override_reason: Optional[str] = None
 
 class PatientFootfallCreate(BaseModel):
     phc_id: str
     date: str
     count: int
+    override_reason: Optional[str] = None
 
 # Action model for Human-in-the-loop Redistribution
 class TransferActionRequest(BaseModel):
@@ -57,3 +114,4 @@ class TransferActionRequest(BaseModel):
     medicine_name: str
     quantity: int
     action: str  # "APPROVE" or "REJECT" or "OVERRIDE"
+    decision_reason: Optional[str] = None

@@ -9,8 +9,10 @@
 
 :root {
     --bg-app: #F8FAFC;
-    --bg-sidebar: #0F172A;
-    --bg-sidebar-hover: #1E293B;
+    --bg-sidebar: #FFFFFF;
+    --bg-sidebar-hover: #F1F5F9;
+    --bg-sidebar-active: #F0FDFA;
+    --border-sidebar: #E2E8F0;
     --bg-card: #FFFFFF;
     --bg-card-hover: #FAFAFA;
     --bg-input: #FFFFFF;
@@ -70,11 +72,11 @@ body {
     width: 100vw;
 }
 
-/* SIDEBAR STYLING (SLEEK SLATE ENTERPRISE DARK CONTRAST) */
+/* SIDEBAR STYLING (MODERN CRISP MEDICAL LIGHT THEME) */
 .sidebar {
     width: var(--sidebar-width);
     background-color: var(--bg-sidebar);
-    border-right: 1px solid #1E293B;
+    border-right: 1px solid var(--border-sidebar);
     display: flex;
     flex-direction: column;
     position: fixed;
@@ -85,8 +87,8 @@ body {
 }
 
 .sidebar-header {
-    padding: 22px 20px;
-    border-bottom: 1px solid #1E293B;
+    padding: 20px 18px;
+    border-bottom: 1px solid var(--border-sidebar);
     display: flex;
     align-items: center;
     gap: 12px;
@@ -101,32 +103,32 @@ body {
     align-items: center;
     justify-content: center;
     font-size: 1.15rem;
-    box-shadow: 0 2px 8px rgba(15, 118, 110, 0.3);
+    box-shadow: 0 2px 8px rgba(15, 118, 110, 0.25);
 }
 
 .brand-name {
     font-size: 1.15rem;
     font-weight: 800;
     letter-spacing: -0.4px;
-    color: #FFFFFF;
+    color: #0F172A;
 }
 
 .brand-ver {
     font-size: 0.65rem;
     font-weight: 700;
-    background: rgba(15, 118, 110, 0.25);
-    color: #2DD4BF;
+    background: #F0FDFA;
+    color: #0F766E;
     padding: 2px 6px;
     border-radius: 10px;
     margin-left: 4px;
-    border: 1px solid rgba(45, 212, 191, 0.3);
+    border: 1px solid #99F6E4;
 }
 
 .sidebar-nav {
-    padding: 16px 12px;
+    padding: 14px 10px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
     flex: 1;
     overflow-y: auto;
 }
@@ -137,17 +139,17 @@ body {
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: #64748B;
-    padding: 14px 12px 6px 12px;
+    padding: 12px 10px 4px 10px;
 }
 
 .sidebar-btn {
     background: transparent;
-    color: #94A3B8;
+    color: #475569;
     border: none;
-    padding: 10px 14px;
+    padding: 9px 12px;
     border-radius: var(--radius-md);
     font-weight: 500;
-    font-size: 0.875rem;
+    font-size: 0.85rem;
     cursor: pointer;
     transition: all 0.15s ease;
     display: flex;
@@ -158,14 +160,15 @@ body {
 }
 
 .sidebar-btn:hover {
-    color: #F8FAFC;
+    color: #0F172A;
     background: var(--bg-sidebar-hover);
 }
 
 .sidebar-btn.active {
-    background: rgba(15, 118, 110, 0.2);
-    color: #2DD4BF;
-    border: 1px solid rgba(45, 212, 191, 0.3);
+    background: var(--bg-sidebar-active);
+    color: #0F766E;
+    border: 1px solid #CCFBF1;
+    border-left: 3px solid #0F766E;
     font-weight: 600;
 }
 
@@ -1723,4 +1726,607 @@ body {
     border: 1px solid #FCA5A5;
     color: #991B1B;
 }
+
+/* ==========================================================================
+   AUTHENTICATION & LOGIN OVERLAY
+   ========================================================================== */
+.login-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: linear-gradient(135deg, #F0FDFA 0%, #F8FAFC 50%, #EFF6FF 100%);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.login-card {
+    background: #FFFFFF;
+    border: 1px solid #CBD5E1;
+    border-radius: var(--radius-xl);
+    box-shadow: 0 20px 40px -15px rgba(15, 23, 42, 0.12), 0 0 0 1px rgba(15, 23, 42, 0.05);
+    width: 100%;
+    max-width: 460px;
+    padding: 36px 32px;
+    position: relative;
+    overflow: hidden;
+}
+
+.login-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, #0F766E, #0D9488, #0284C7);
+}
+
+.login-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+}
+
+.login-title {
+    font-size: 1.45rem;
+    font-weight: 800;
+    color: #0F172A;
+    letter-spacing: -0.5px;
+}
+
+.login-subtitle {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.login-form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.login-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.login-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #334155;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.login-input-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.login-input {
+    width: 100%;
+    padding: 10px 14px;
+    font-size: 0.9rem;
+    border: 1px solid #CBD5E1;
+    border-radius: var(--radius-md);
+    background: #FFFFFF;
+    color: #0F172A;
+    transition: all 0.2s ease;
+    font-family: inherit;
+}
+
+.login-input:focus {
+    outline: none;
+    border-color: #0F766E;
+    box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
+}
+
+.login-toggle-pwd {
+    position: absolute;
+    right: 12px;
+    background: none;
+    border: none;
+    color: #64748B;
+    cursor: pointer;
+    font-size: 0.9rem;
+    padding: 4px;
+}
+
+.login-toggle-pwd:hover {
+    color: #0F172A;
+}
+
+.login-options {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.825rem;
+}
+
+.login-remember {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    color: #475569;
+}
+
+.login-forgot-link {
+    color: #0F766E;
+    text-decoration: none;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.login-forgot-link:hover {
+    text-decoration: underline;
+}
+
+.login-btn {
+    background: linear-gradient(135deg, #0F766E, #0D9488);
+    color: white;
+    border: none;
+    border-radius: var(--radius-md);
+    padding: 11px;
+    font-size: 0.925rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 6px;
+    box-shadow: 0 4px 12px rgba(15, 118, 110, 0.25);
+}
+
+.login-btn:hover {
+    opacity: 0.95;
+    transform: translateY(-1px);
+}
+
+.login-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.login-alert {
+    padding: 10px 14px;
+    border-radius: var(--radius-md);
+    font-size: 0.825rem;
+    display: none;
+    align-items: center;
+    gap: 8px;
+}
+
+.login-alert.error {
+    display: flex;
+    background: #FEF2F2;
+    border: 1px solid #FCA5A5;
+    color: #991B1B;
+}
+
+.login-alert.disabled {
+    display: flex;
+    background: #FFFBEB;
+    border: 1px solid #FCD34D;
+    color: #92400E;
+}
+
+/* Quick Demo Login Pills */
+.demo-accounts-box {
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px dashed #E2E8F0;
+}
+
+.demo-title {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #64748B;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.demo-pills-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+}
+
+.demo-pill-btn {
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #334155;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.15s ease;
+    display: flex;
+    flex-direction: column;
+}
+
+.demo-pill-btn:hover {
+    background: #F0FDFA;
+    border-color: #99F6E4;
+    color: #0F766E;
+}
+
+.demo-pill-role {
+    font-size: 0.65rem;
+    font-weight: 500;
+    color: #64748B;
+}
+
+/* ==========================================================================
+   TOP HEADER USER PROFILE & MENU
+   ========================================================================== */
+.user-menu-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.user-profile-badge {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 10px 4px 6px;
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 30px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.user-profile-badge:hover {
+    background: #F1F5F9;
+    border-color: #CBD5E1;
+}
+
+.user-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #0F766E, #0284C7);
+    color: white;
+    font-size: 0.75rem;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.user-details {
+    display: flex;
+    flex-direction: column;
+    text-align: left;
+}
+
+.user-name {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #0F172A;
+    line-height: 1.2;
+}
+
+.user-role-badge {
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: #0F766E;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.user-scope-chip {
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: #64748B;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
+    padding: 2px 8px;
+    margin-left: 4px;
+}
+
+.user-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 220px;
+    background: #FFFFFF;
+    border: 1px solid #E2E8F0;
+    border-radius: var(--radius-lg);
+    box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.12);
+    padding: 6px;
+    z-index: 1000;
+    display: none;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.user-dropdown-menu.show {
+    display: flex;
+}
+
+.user-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    font-size: 0.825rem;
+    color: #334155;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    text-align: left;
+    width: 100%;
+    transition: all 0.1s ease;
+}
+
+.user-dropdown-item:hover {
+    background: #F1F5F9;
+    color: #0F172A;
+}
+
+.user-dropdown-item.danger {
+    color: #DC2626;
+}
+
+.user-dropdown-item.danger:hover {
+    background: #FEF2F2;
+    color: #991B1B;
+}
+
+.user-dropdown-divider {
+    height: 1px;
+    background: #E2E8F0;
+    margin: 4px 0;
+}
+
+/* ==========================================================================
+   SUPERVISOR MONITORING READ-ONLY BANNER
+   ========================================================================== */
+.supervisor-monitoring-banner {
+    background: #FFFBEB;
+    border: 1px solid #FCD34D;
+    color: #92400E;
+    padding: 10px 16px;
+    border-radius: var(--radius-md);
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.825rem;
+    font-weight: 500;
+}
+
+.supervisor-banner-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.supervisor-tag {
+    background: #FEF3C7;
+    border: 1px solid #F59E0B;
+    color: #B45309;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 700;
+}
+
+/* ==========================================================================
+   ADMINISTRATIVE OVERRIDE MODAL & GENERAL MODALS
+   ========================================================================== */
+.meridian-modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(15, 23, 42, 0.5);
+    backdrop-filter: blur(4px);
+    z-index: 10001;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+
+.meridian-modal-overlay.active {
+    display: flex;
+}
+
+.meridian-modal-content {
+    background: #FFFFFF;
+    border-radius: var(--radius-xl);
+    width: 100%;
+    max-width: 520px;
+    box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25);
+    border: 1px solid #CBD5E1;
+    overflow: hidden;
+    animation: modalSlide 0.2s ease-out;
+}
+
+@keyframes modalSlide {
+    from { opacity: 0; transform: translateY(12px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.meridian-modal-header {
+    padding: 18px 24px;
+    border-bottom: 1px solid #E2E8F0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.meridian-modal-title {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: #0F172A;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.meridian-modal-close {
+    background: none;
+    border: none;
+    font-size: 1.25rem;
+    color: #64748B;
+    cursor: pointer;
+    padding: 4px;
+    line-height: 1;
+}
+
+.meridian-modal-close:hover {
+    color: #0F172A;
+}
+
+.meridian-modal-body {
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.meridian-modal-footer {
+    padding: 14px 24px;
+    background: #F8FAFC;
+    border-top: 1px solid #E2E8F0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+/* ==========================================================================
+   USER MANAGEMENT & AUDIT LOGS TABLES
+   ========================================================================== */
+.table-filter-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.filter-pills {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.filter-pill {
+    background: #F1F5F9;
+    border: 1px solid #E2E8F0;
+    color: #475569;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.775rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.filter-pill.active {
+    background: #0F766E;
+    color: #FFFFFF;
+    border-color: #0F766E;
+}
+
+.badge-role {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.675rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.badge-role.admin {
+    background: #EEF2FF;
+    color: #4338CA;
+    border: 1px solid #C7D2FE;
+}
+
+.badge-role.officer {
+    background: #F0FDF4;
+    color: #15803D;
+    border: 1px solid #BBF7D0;
+}
+
+.badge-role.staff {
+    background: #F0FDFA;
+    color: #0F766E;
+    border: 1px solid #99F6E4;
+}
+
+.badge-status {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 0.675rem;
+    font-weight: 700;
+}
+
+.badge-status.active {
+    background: #ECFDF5;
+    color: #047857;
+}
+
+.badge-status.disabled {
+    background: #FEF2F2;
+    color: #B91C1C;
+}
+
+.badge-result {
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.675rem;
+    font-weight: 700;
+}
+
+.badge-result.success {
+    background: #ECFDF5;
+    color: #065F46;
+}
+
+.badge-result.denied {
+    background: #FEF2F2;
+    color: #991B1B;
+}
+
+.badge-result.overridden {
+    background: #FFFBEB;
+    color: #92400E;
+}
+
+.badge-result.failure {
+    background: #F1F5F9;
+    color: #475569;
+}
+
 

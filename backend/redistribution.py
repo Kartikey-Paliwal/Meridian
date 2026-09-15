@@ -93,9 +93,14 @@ def generate_redistribution_recommendations(inventory_data: List[Dict[str, Any]]
                     is_cold = "Insulin" in med_name or "Vaccine" in med_name
                     cost = calculate_transport_cost(dist_km, transfer_qty, is_cold_chain=is_cold)
                     
+                    src_district = "DIST-NORTH" if d_phc["phc_id"] in ["PHC-001", "PHC-002"] else "DIST-SOUTH"
+                    tgt_district = "DIST-NORTH" if s_phc["phc_id"] in ["PHC-001", "PHC-002"] else "DIST-SOUTH"
                     recommendation = {
                         "source_phc": d_phc["phc_id"],
                         "target_phc": s_phc["phc_id"],
+                        "source_district_id": src_district,
+                        "target_district_id": tgt_district,
+                        "is_inter_district": src_district != tgt_district,
                         "medicine_name": med_name,
                         "recommended_quantity": transfer_qty,
                         "eta_minutes": eta,

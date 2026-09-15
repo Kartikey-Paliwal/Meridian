@@ -13,93 +13,117 @@
     <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
-    <div class="app-layout">
+    <!-- 0. SECURE MERIDIAN AUTHENTICATION OVERLAY -->
+    <div id="login-overlay" class="login-overlay">
+        <div class="login-card">
+            <div class="login-brand">
+                <div class="brand-icon">🌐</div>
+                <div>
+                    <div class="login-title">MERIDIAN</div>
+                    <div class="login-subtitle">National Healthcare Supply Chain Platform</div>
+                </div>
+            </div>
+
+            <!-- Login Alert Notification -->
+            <div id="login-alert" class="login-alert">
+                <span id="login-alert-icon">⚠️</span>
+                <span id="login-alert-text">Invalid credentials</span>
+            </div>
+
+            <form id="login-form" class="login-form" onsubmit="handleLoginSubmit(event)">
+                <div class="login-input-group">
+                    <label class="login-label" for="login-username">
+                        <span>Email or Employee ID</span>
+                    </label>
+                    <div class="login-input-wrap">
+                        <input type="text" id="login-username" class="login-input" placeholder="e.g. admin@meridian.health or EMP-NAT-01" required autocomplete="username">
+                    </div>
+                </div>
+
+                <div class="login-input-group">
+                    <label class="login-label" for="login-password">
+                        <span>Password</span>
+                        <a href="javascript:void(0)" class="login-forgot-link" onclick="openForgotPasswordModal()">Forgot password?</a>
+                    </label>
+                    <div class="login-input-wrap">
+                        <input type="password" id="login-password" class="login-input" placeholder="••••••••••••" required autocomplete="current-password">
+                        <button type="button" class="login-toggle-pwd" onclick="toggleLoginPasswordVisibility()" title="Show/Hide Password">👁️</button>
+                    </div>
+                </div>
+
+                <div class="login-options">
+                    <label class="login-remember">
+                        <input type="checkbox" id="login-remember-me">
+                        <span>Remember me for 7 days</span>
+                    </label>
+                </div>
+
+                <button type="submit" id="login-submit-btn" class="login-btn">
+                    <span id="login-btn-spinner" style="display:none;">⏳</span>
+                    <span id="login-btn-text">Sign In to Meridian</span>
+                </button>
+            </form>
+
+            <!-- Quick Demo Credentials Box -->
+            <div class="demo-accounts-box">
+                <div class="demo-title">
+                    <span>⚡ Quick Demo Credentials</span>
+                    <span style="font-size:0.65rem; color:var(--accent-teal);">One-Click Switch</span>
+                </div>
+                <div class="demo-pills-grid">
+                    <button type="button" class="demo-pill-btn" onclick="quickFillCredentials('admin@meridian.health', 'Admin@123')">
+                        <span>🏛️ National Admin</span>
+                        <span class="demo-pill-role">Nationwide Oversight</span>
+                    </button>
+                    <button type="button" class="demo-pill-btn" onclick="quickFillCredentials('officer.north@meridian.health', 'Officer@123')">
+                        <span>📊 District Officer (N)</span>
+                        <span class="demo-pill-role">District-North (PHC 1 & 2)</span>
+                    </button>
+                    <button type="button" class="demo-pill-btn" onclick="quickFillCredentials('officer.south@meridian.health', 'Officer@123')">
+                        <span>📊 District Officer (S)</span>
+                        <span class="demo-pill-role">District-South (PHC 3 & 4)</span>
+                    </button>
+                    <button type="button" class="demo-pill-btn" onclick="quickFillCredentials('staff.alpha@meridian.health', 'Staff@123')">
+                        <span>🏥 PHC Staff (Alpha)</span>
+                        <span class="demo-pill-role">Alpha Sector (PHC-001)</span>
+                    </button>
+                    <button type="button" class="demo-pill-btn" onclick="quickFillCredentials('staff.beta@meridian.health', 'Staff@123')">
+                        <span>🏥 PHC Staff (Beta)</span>
+                        <span class="demo-pill-role">Beta Central (PHC-002)</span>
+                    </button>
+                    <button type="button" class="demo-pill-btn" onclick="quickFillCredentials('temp.staff@meridian.health', 'TempPassword@123')">
+                        <span>⚠️ Temp Password</span>
+                        <span class="demo-pill-role">Tests Forced Change</span>
+                    </button>
+                    <button type="button" class="demo-pill-btn" onclick="quickFillCredentials('disabled.user@meridian.health', 'Disabled@123')">
+                        <span>⛔ Disabled Account</span>
+                        <span class="demo-pill-role">Tests Account Lockout</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="app-layout" id="app-layout" style="display:none;">
         
-        <!-- FIXED LEFT SIDEBAR (Linear / Vercel Class) -->
+        <!-- FIXED LEFT SIDEBAR (CRISP HEALTHCARE LIGHT THEME) -->
         <aside class="sidebar">
             <div class="sidebar-header">
                 <div class="brand-icon">🌐</div>
                 <div>
                     <span class="brand-name">MERIDIAN</span>
-                    <span class="brand-ver">v1.0</span>
+                    <span class="brand-ver">v2.0</span>
                 </div>
             </div>
 
-            <nav class="sidebar-nav">
-                <div class="nav-section-title">CORE PLATFORM</div>
-                
-                <button class="sidebar-btn active" onclick="switchTab('phc-dashboard', 'PHC Edge Node')">
-                    <div class="sidebar-btn-left">
-                        <span class="icon">🏥</span> PHC Edge Node
-                    </div>
-                </button>
-
-                <button class="sidebar-btn" id="sidebar-staff-attendance-btn" onclick="switchTab('staff-attendance-panel', 'Nurse & Staff Attendance Management')">
-                    <div class="sidebar-btn-left">
-                        <span class="icon">🪪</span> Staff Attendance
-                    </div>
-                </button>
-
-                <button class="sidebar-btn" onclick="switchTab('district-dashboard', 'District Command & Alerts')">
-                    <div class="sidebar-btn-left">
-                        <span class="icon">📊</span> District Command
-                    </div>
-                </button>
-
-                <button class="sidebar-btn" onclick="switchTab('redistribution-panel', 'Redistribution Engine')">
-                    <div class="sidebar-btn-left">
-                        <span class="icon">⚡</span> Redistribution
-                    </div>
-                    <span class="badge-count" id="redist-count-badge">0</span>
-                </button>
-
-                <div class="nav-section-title">INTELLIGENCE & AI</div>
-
-                <button class="sidebar-btn" onclick="switchTab('forecasting-panel', 'AI Forecasting & Math')">
-                    <div class="sidebar-btn-left">
-                        <span class="icon">📈</span> AI Forecasting
-                    </div>
-                </button>
-
-                <button class="sidebar-btn" onclick="switchTab('federated-panel', 'Federated AI (FedAvg)')">
-                    <div class="sidebar-btn-left">
-                        <span class="icon">🧬</span> Federated AI
-                    </div>
-                </button>
-
-                <div class="nav-section-title">NATIONAL & GLOBAL GOVERNANCE</div>
-
-                <button class="sidebar-btn" onclick="switchTab('national-dashboard', 'National Health Command Center')">
-                    <div class="sidebar-btn-left">
-                        <span class="icon">🏛️</span> National Command
-                    </div>
-                </button>
-
-                <button class="sidebar-btn" onclick="switchTab('national-brics-panel', 'BRICS Federated Layer')">
-                    <div class="sidebar-btn-left">
-                        <span class="icon">🌍</span> BRICS Layer
-                    </div>
-                </button>
-
-                <div class="nav-section-title">SECURITY & ENTERPRISE</div>
-
-                <button class="sidebar-btn" onclick="switchTab('privacy-panel', 'Privacy & Encryption')">
-                    <div class="sidebar-btn-left">
-                        <span class="icon">🔒</span> Privacy & Encryption
-                    </div>
-                </button>
-
-                <button class="sidebar-btn" onclick="switchTab('enterprise-panel', 'Enterprise Control Center')">
-                    <div class="sidebar-btn-left">
-                        <span class="icon">🏛️</span> Enterprise Control
-                    </div>
-                    <span class="badge badge-success">Q1-Q4</span>
-                </button>
+            <!-- Dynamic Navigation Loaded by Role in app.js -->
+            <nav class="sidebar-nav" id="sidebar-dynamic-nav">
+                <!-- Navigation items dynamically injected by renderRoleSidebar() -->
             </nav>
 
             <div class="sidebar-footer">
                 <div>Environment: <strong>Production Local</strong></div>
-                <div style="font-size:0.7rem; color:var(--text-muted); margin-top:2px;">Y Combinator Enterprise Architecture</div>
+                <div style="font-size:0.7rem; color:var(--text-muted); margin-top:2px;">Hierarchical RBAC Architecture</div>
             </div>
         </aside>
 
@@ -119,8 +143,34 @@
                         <span class="pulse-dot"></span>
                         <span id="system-status-text">System Live • Enterprise Node</span>
                     </div>
-                    <div class="node-chip">
-                        <span>Node: <strong>PHC-001 (Alpha)</strong></span>
+
+                    <!-- USER PROFILE BADGE & ACCOUNT MENU -->
+                    <div class="user-menu-container">
+                        <div class="user-profile-badge" onclick="toggleUserDropdown(event)">
+                            <div class="user-avatar" id="nav-user-avatar">NA</div>
+                            <div class="user-details">
+                                <span class="user-name" id="nav-user-name">Loading...</span>
+                                <div style="display:flex; align-items:center;">
+                                    <span class="user-role-badge" id="nav-user-role">STAFF</span>
+                                    <span class="user-scope-chip" id="nav-user-scope">PHC-001</span>
+                                </div>
+                            </div>
+                            <span style="font-size:0.7rem; color:#64748B; margin-left:4px;">▼</span>
+                        </div>
+
+                        <!-- Dropdown Menu -->
+                        <div class="user-dropdown-menu" id="user-dropdown-menu">
+                            <button type="button" class="user-dropdown-item" onclick="openProfileModal()">
+                                <span>👤</span> Account Profile
+                            </button>
+                            <button type="button" class="user-dropdown-item" onclick="openChangePasswordModal()">
+                                <span>🔑</span> Change Password
+                            </button>
+                            <div class="user-dropdown-divider"></div>
+                            <button type="button" class="user-dropdown-item danger" onclick="handleLogout()">
+                                <span>🚪</span> Sign Out
+                            </button>
+                        </div>
                     </div>
                 </div>
             </header>
@@ -128,6 +178,17 @@
             <!-- MAIN VIEW CONTAINER -->
             <main class="view-content">
                 
+                <!-- SUPERVISOR READ-ONLY MONITORING BANNER -->
+                <div id="supervisor-banner" class="supervisor-monitoring-banner" style="display:none;">
+                    <div class="supervisor-banner-left">
+                        <span class="supervisor-tag">SUPERVISOR MONITORING MODE</span>
+                        <span id="supervisor-banner-text">Viewing operational records in Read-Only mode. Direct modifications require administrative override.</span>
+                    </div>
+                    <button type="button" class="btn btn-sm" id="supervisor-override-btn" style="background:#F59E0B; color:white; border:none; padding:4px 10px; border-radius:4px; font-weight:600; cursor:pointer;" onclick="openOverrideModal()">
+                        ⚠️ Administrative Override
+                    </button>
+                </div>
+
                 <!-- 1. PHC EDGE DASHBOARD -->
                 <section id="phc-dashboard" class="tab-content active">
                     <!-- HEADER BLOCK MATCHING REFERENCE IMAGE -->
@@ -1224,7 +1285,310 @@
                     </div>
                 </section>
 
+                <!-- 11. USER MANAGEMENT PANEL -->
+                <section id="user-management-panel" class="tab-content">
+                    <div class="header-row">
+                        <div class="header-title-area">
+                            <span class="eyebrow-tag">IDENTITY & ACCESS MANAGEMENT</span>
+                            <h1 class="main-page-title">User Directory & Role Management</h1>
+                            <p class="section-subtitle">Manage authorized officers and staff in accordance with the 3-tier hierarchy.</p>
+                        </div>
+                        <button type="button" class="btn btn-primary" onclick="openCreateUserModal()">
+                            ➕ Create Authorised Account
+                        </button>
+                    </div>
+
+                    <div class="card shadow-sm margin-top-lg">
+                        <div class="table-filter-bar">
+                            <div class="filter-pills">
+                                <button class="filter-pill active" onclick="filterUsersTable('ALL', this)">All Accounts</button>
+                                <button class="filter-pill" onclick="filterUsersTable('DISTRICT_OFFICER', this)">District Officers</button>
+                                <button class="filter-pill" onclick="filterUsersTable('PHC_STAFF', this)">PHC Staff</button>
+                                <button class="filter-pill" onclick="filterUsersTable('ACTIVE', this)">Active Only</button>
+                                <button class="filter-pill" onclick="filterUsersTable('DISABLED', this)">Disabled Only</button>
+                            </div>
+                            <button class="btn btn-sm btn-outline" onclick="loadUsersDirectory()">🔄 Refresh</button>
+                        </div>
+
+                        <div class="table-responsive">
+                            <table class="data-table" id="users-table">
+                                <thead>
+                                    <tr>
+                                        <th>Name & Email</th>
+                                        <th>Employee ID</th>
+                                        <th>Role</th>
+                                        <th>Assigned Scope</th>
+                                        <th>Account Status</th>
+                                        <th>Pwd State</th>
+                                        <th>Last Login</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="users-table-body">
+                                    <tr><td colspan="8" style="text-align:center; padding:20px; color:var(--text-muted);">Loading user records...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- 12. AUDIT LOGS PANEL -->
+                <section id="audit-logs-panel" class="tab-content">
+                    <div class="header-row">
+                        <div class="header-title-area">
+                            <span class="eyebrow-tag">TAMPER-EVIDENT GOVERNANCE</span>
+                            <h1 class="main-page-title">Security & Operational Audit Trail</h1>
+                            <p class="section-subtitle">Immutable chronological log of authentications, administrative overrides, and inventory updates.</p>
+                        </div>
+                        <button class="btn btn-outline" onclick="loadAuditLogs()">
+                            🔄 Refresh Logs
+                        </button>
+                    </div>
+
+                    <div class="card shadow-sm margin-top-lg">
+                        <div class="table-filter-bar">
+                            <div class="filter-pills">
+                                <button class="filter-pill active" onclick="filterAuditTable('ALL', this)">All Events</button>
+                                <button class="filter-pill" onclick="filterAuditTable('LOGIN', this)">Logins</button>
+                                <button class="filter-pill" onclick="filterAuditTable('OVERRIDDEN', this)">Overrides</button>
+                                <button class="filter-pill" onclick="filterAuditTable('DENIED', this)">Access Denied</button>
+                                <button class="filter-pill" onclick="filterAuditTable('TRANSFER', this)">Transfers</button>
+                            </div>
+                            <span style="font-size:0.8rem; color:var(--text-muted);" id="audit-count-label">Showing recent events</span>
+                        </div>
+
+                        <div class="table-responsive">
+                            <table class="data-table" id="audit-table">
+                                <thead>
+                                    <tr>
+                                        <th>Timestamp</th>
+                                        <th>User & Role</th>
+                                        <th>Action</th>
+                                        <th>Target Record</th>
+                                        <th>Scope</th>
+                                        <th>Result</th>
+                                        <th>Reason / Details</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="audit-table-body">
+                                    <tr><td colspan="7" style="text-align:center; padding:20px; color:var(--text-muted);">Loading audit log records...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </section>
+
             </main>
+        </div>
+    </div>
+
+    <!-- ========================================================================== -->
+    <!-- INTERACTIVE MODALS -->
+    <!-- ========================================================================== -->
+
+    <!-- 1. ADMINISTRATIVE OVERRIDE MODAL -->
+    <div id="admin-override-modal" class="meridian-modal-overlay">
+        <div class="meridian-modal-content">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title">
+                    <span>⚠️</span> Administrative Override Confirmation
+                </div>
+                <button type="button" class="meridian-modal-close" onclick="closeOverrideModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <div style="background:#FEF3C7; border:1px solid #F59E0B; color:#92400E; padding:12px; border-radius:8px; font-size:0.85rem; line-height:1.4;">
+                    <strong>Mandatory Governance Requirement:</strong> You are executing an operational record change outside normal PHC staff workflow. You must provide a clear, written reason which will be permanently recorded in the National Audit Log.
+                </div>
+
+                <div class="form-group">
+                    <label>Target Action & Record:</label>
+                    <div id="override-target-summary" style="font-family:var(--font-mono); font-size:0.85rem; background:#F8FAFC; border:1px solid #E2E8F0; padding:8px 12px; border-radius:6px; color:#0F172A;">
+                        Updating Inventory
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="override-reason-input">Reason for Administrative Override (Required):</label>
+                    <textarea id="override-reason-input" class="login-input" rows="3" placeholder="e.g. Outbreak emergency directive approved by Directorate of Health Services..." required></textarea>
+                </div>
+
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <input type="checkbox" id="override-confirm-checkbox">
+                    <label for="override-confirm-checkbox" style="font-size:0.825rem; color:#334155; cursor:pointer;">
+                        I confirm this override is necessary, authorized, and verified.
+                    </label>
+                </div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeOverrideModal()">Cancel</button>
+                <button type="button" class="btn btn-primary" id="override-submit-btn" onclick="submitPendingOverride()">Confirm & Execute Override</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. CHANGE PASSWORD MODAL -->
+    <div id="change-password-modal" class="meridian-modal-overlay">
+        <div class="meridian-modal-content">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title">
+                    <span>🔑</span> Update Password
+                </div>
+                <button type="button" class="meridian-modal-close" id="change-pwd-close-btn" onclick="closeChangePasswordModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <div id="must-change-pwd-alert" style="display:none; background:#EFF6FF; border:1px solid #93C5FD; color:#1E40AF; padding:10px 14px; border-radius:8px; font-size:0.825rem;">
+                    <strong>Security Notice:</strong> You are using a temporary password. You must set a new permanent password before accessing the system.
+                </div>
+
+                <div class="form-group">
+                    <label for="pwd-old">Current Password:</label>
+                    <input type="password" id="pwd-old" class="login-input" placeholder="Current password" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="pwd-new">New Password (min 6 characters):</label>
+                    <input type="password" id="pwd-new" class="login-input" placeholder="New password" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="pwd-confirm">Confirm New Password:</label>
+                    <input type="password" id="pwd-confirm" class="login-input" placeholder="Confirm new password" required>
+                </div>
+
+                <div id="pwd-error-msg" style="display:none; color:var(--accent-rose); font-size:0.825rem;"></div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-outline" id="change-pwd-cancel-btn" onclick="closeChangePasswordModal()">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="submitChangePassword()">Save New Password</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. CREATE USER MODAL -->
+    <div id="create-user-modal" class="meridian-modal-overlay">
+        <div class="meridian-modal-content">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title">
+                    <span>➕</span> Create Authorised User Account
+                </div>
+                <button type="button" class="meridian-modal-close" onclick="closeCreateUserModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <div class="form-group">
+                    <label for="new-user-name">Full Name:</label>
+                    <input type="text" id="new-user-name" class="login-input" placeholder="e.g. Dr. Ramesh Gupta" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="new-user-email">Official Email:</label>
+                    <input type="email" id="new-user-email" class="login-input" placeholder="e.g. ramesh.gupta@meridian.health" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="new-user-role">Role Hierarchy:</label>
+                    <select id="new-user-role" class="login-input" onchange="handleNewUserRoleChange(this.value)">
+                        <option value="PHC_STAFF">PHC Staff (Facility Operations)</option>
+                        <option value="DISTRICT_OFFICER">District Officer (District Administration)</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="new-user-district-group">
+                    <label for="new-user-district">Assigned District:</label>
+                    <select id="new-user-district" class="login-input" onchange="updateNewUserPhcOptions(this.value)">
+                        <option value="DIST-NORTH">North Capital District (DIST-NORTH)</option>
+                        <option value="DIST-SOUTH">Southern Health Corridor (DIST-SOUTH)</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="new-user-phc-group">
+                    <label for="new-user-phc">Assigned PHC Facility:</label>
+                    <select id="new-user-phc" class="login-input">
+                        <option value="PHC-001">Alpha Sector PHC (PHC-001)</option>
+                        <option value="PHC-002">Beta Central PHC (PHC-002)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="new-user-temp-pwd">Temporary Password:</label>
+                    <input type="text" id="new-user-temp-pwd" class="login-input" value="Meridian@2026">
+                    <span style="font-size:0.7rem; color:var(--text-muted);">User will be forced to change this on their first login.</span>
+                </div>
+
+                <div id="create-user-error" style="display:none; color:var(--accent-rose); font-size:0.825rem;"></div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeCreateUserModal()">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="submitCreateUser()">Create User Account</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 4. PROFILE MODAL -->
+    <div id="profile-modal" class="meridian-modal-overlay">
+        <div class="meridian-modal-content">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title">
+                    <span>👤</span> User Account Profile
+                </div>
+                <button type="button" class="meridian-modal-close" onclick="closeProfileModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <div style="display:flex; align-items:center; gap:16px; margin-bottom:12px;">
+                    <div class="user-avatar" id="modal-profile-avatar" style="width:50px; height:50px; font-size:1.2rem;">NA</div>
+                    <div>
+                        <h3 id="modal-profile-name" style="font-size:1.15rem; font-weight:700; color:#0F172A;">Loading...</h3>
+                        <div style="display:flex; gap:6px; margin-top:4px;">
+                            <span class="badge-role admin" id="modal-profile-role">ROLE</span>
+                            <span class="badge-status active" id="modal-profile-status">ACTIVE</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:8px; font-size:0.85rem;">
+                    <div><strong>User ID:</strong> <span id="modal-profile-id" style="font-family:var(--font-mono);">--</span></div>
+                    <div><strong>Email:</strong> <span id="modal-profile-email">--</span></div>
+                    <div><strong>Employee ID:</strong> <span id="modal-profile-emp-id">--</span></div>
+                    <div><strong>Assigned District:</strong> <span id="modal-profile-district">--</span></div>
+                    <div><strong>Assigned Facility:</strong> <span id="modal-profile-phc">--</span></div>
+                    <div><strong>Last Login:</strong> <span id="modal-profile-last-login">--</span></div>
+                </div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-primary" onclick="closeProfileModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 5. FORGOT PASSWORD MODAL -->
+    <div id="forgot-password-modal" class="meridian-modal-overlay">
+        <div class="meridian-modal-content">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title">
+                    <span>🔄</span> Password Recovery Assistance
+                </div>
+                <button type="button" class="meridian-modal-close" onclick="closeForgotPasswordModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <p style="font-size:0.85rem; color:#475569;">Enter your official Meridian email address to generate a secure single-use 15-minute recovery token.</p>
+                <div class="form-group">
+                    <label for="forgot-email-input">Registered Email:</label>
+                    <input type="email" id="forgot-email-input" class="login-input" placeholder="e.g. admin@meridian.health">
+                </div>
+
+                <div id="forgot-token-result" style="display:none; background:#F0FDF4; border:1px solid #86EFAC; color:#166534; padding:12px; border-radius:8px; font-size:0.825rem;">
+                    <div><strong>Demo Token Generated:</strong></div>
+                    <div id="forgot-token-code" style="font-family:var(--font-mono); font-size:0.95rem; font-weight:700; margin:6px 0; word-break:break-all;"></div>
+                    <div class="form-group margin-top-sm">
+                        <label for="forgot-new-pwd">Set New Password:</label>
+                        <input type="password" id="forgot-new-pwd" class="login-input" placeholder="New password (min 6 chars)">
+                    </div>
+                    <button type="button" class="btn btn-sm btn-primary margin-top-xs" onclick="submitResetPasswordWithToken()">Apply New Password</button>
+                </div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeForgotPasswordModal()">Close</button>
+                <button type="button" class="btn btn-primary" id="forgot-request-btn" onclick="submitForgotPasswordRequest()">Generate Reset Token</button>
+            </div>
         </div>
     </div>
 

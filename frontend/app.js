@@ -1,8 +1,11 @@
-// Meridian Frontend Application Logic
+// Meridian Frontend Application Logic - Version 2.0 (Enterprise RBAC)
+window.currentUser = null;
 let activePhcId = "PHC-001";
+let activeDistrictId = "DIST-NORTH";
 let footfallChartInstance = null;
 let forecastChartInstance = null;
 let speechRecognitionInstance = null;
+let pendingOverrideAction = null;
 
 // Attendance module state
 let currentAttendanceRosterData = [];
@@ -10,34 +13,303 @@ let currentStaffMembers = [];
 let lastPunchTimes = {}; // Card UID -> timestamp (ms) for debounce/duplicate prevention
 
 document.addEventListener("DOMContentLoaded", () => {
-    // Check URL hash for initial tab route (e.g. #staff-attendance-panel)
-    const initialHash = window.location.hash ? window.location.hash.replace("#", "") : "phc-dashboard";
+    checkAuthSession();
+});
 
-    loadPHCDashboard(activePhcId);
-    loadDistrictData();
-    loadRedistributionRecommendations();
-    loadFederatedData();
-    loadNationalBricsData();
-    loadNationalDashboard();
-    loadStaffAttendancePage(activePhcId);
+// -------------------------------------------------------------
+// 0. AUTHENTICATION & SESSION MANAGEMENT
+// -------------------------------------------------------------
+async function checkAuthSession() {
+    try {
+        const res = await fetch("/api/auth/me");
+        if (res.ok) {
+            const user = await res.json();
+            initAuthenticatedSession(user);
+        } else {
+            showLoginScreen();
+        }
+    } catch (err) {
+        showLoginScreen();
+    }
+}
+
+function showLoginScreen() {
+    window.currentUser = null;
+    const loginOverlay = document.getElementById("login-overlay");
+    const appLayout = document.getElementById("app-layout");
+    if (loginOverlay) loginOverlay.style.display = "flex";
+    if (appLayout) appLayout.style.display = "none";
+}
+
+function quickFillCredentials(username, password) {
+    const uInput = document.getElementById("login-username");
+    const pInput = document.getElementById("login-password");
+    if (uInput) uInput.value = username;
+    if (pInput) pInput.value = password;
+    
+    // Auto-trigger submit for slick demo evaluation
+    const fakeEvent = { preventDefault: () => {} };
+    handleLoginSubmit(fakeEvent);
+}
+
+function toggleLoginPasswordVisibility() {
+    const pwd = document.getElementById("login-password");
+    if (pwd) {
+        pwd.type = pwd.type === "password" ? "text" : "password";
+    }
+}
+
+async function handleLoginSubmit(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    const username = document.getElementById("login-username").value;
+    const password = document.getElementById("login-password").value;
+    const rememberMe = document.getElementById("login-remember-me") ? document.getElementById("login-remember-me").checked : false;
+    
+    const alertBox = document.getElementById("login-alert");
+    const alertText = document.getElementById("login-alert-text");
+    const btn = document.getElementById("login-submit-btn");
+    const spinner = document.getElementById("login-btn-spinner");
+    const btnText = document.getElementById("login-btn-text");
+
+    if (alertBox) {
+        alertBox.className = "login-alert";
+        alertBox.style.display = "none";
+    }
+    if (btn) btn.disabled = true;
+    if (spinner) spinner.style.display = "inline";
+    if (btnText) btnText.innerText = "Authenticating...";
+
+    try {
+        const res = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username, password, remember_me: rememberMe })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+            if (alertBox) {
+                alertBox.style.display = "flex";
+                if (res.status === 403) {
+                    alertBox.classList.add("disabled");
+                    alertText.innerText = data.detail || "This account has been disabled.";
+                } else if (res.status === 429) {
+                    alertBox.classList.add("error");
+                    alertText.innerText = data.detail || "Too many failed attempts. Rate limited.";
+                } else {
+                    alertBox.classList.add("error");
+                    alertText.innerText = data.detail || "Invalid credentials.";
+                }
+            }
+            return;
+        }
+
+        initAuthenticatedSession(data.user);
+    } catch (err) {
+        if (alertBox) {
+            alertBox.style.display = "flex";
+            alertBox.classList.add("error");
+            alertText.innerText = "Network connection failed. Verify backend server is running.";
+        }
+    } finally {
+        if (btn) btn.disabled = false;
+        if (spinner) spinner.style.display = "none";
+        if (btnText) btnText.innerText = "Sign In to Meridian";
+    }
+}
+
+async function handleLogout() {
+    try {
+        await fetch("/api/auth/logout", { method: "POST" });
+    } catch (e) {
+        console.error("Logout request failed:", e);
+    }
+    showLoginScreen();
+    window.location.hash = "";
+}
+
+function initAuthenticatedSession(user) {
+    window.currentUser = user;
+    const loginOverlay = document.getElementById("login-overlay");
+    const appLayout = document.getElementById("app-layout");
+    if (loginOverlay) loginOverlay.style.display = "none";
+    if (appLayout) appLayout.style.display = "flex";
+
+    renderUserProfile(user);
+    renderRoleSidebar(user.role);
+    setupScopedPhcSelector();
+
+    // Check mandatory temporary password change
+    if (user.must_change_password) {
+        openChangePasswordModal(true);
+    }
+
+    // Role-tailored initial view routing
+    if (user.role === "NATIONAL_ADMIN") {
+        activePhcId = "PHC-001";
+        switchTab("national-dashboard", "National Health Command Center");
+        loadNationalDashboard();
+        loadDistrictData();
+        loadRedistributionRecommendations();
+    } else if (user.role === "DISTRICT_OFFICER") {
+        activeDistrictId = user.assigned_district_id || "DIST-NORTH";
+        activePhcId = activeDistrictId === "DIST-SOUTH" ? "PHC-003" : "PHC-001";
+        switchTab("district-dashboard", "District Command & Alerts");
+        loadDistrictData();
+        loadRedistributionRecommendations();
+        loadPHCDashboard(activePhcId);
+    } else { // PHC_STAFF
+        activePhcId = user.assigned_phc_id || "PHC-001";
+        switchTab("phc-dashboard", "PHC Edge Node");
+        loadPHCDashboard(activePhcId);
+        loadRedistributionRecommendations();
+        loadStaffAttendancePage(activePhcId);
+    }
+
     startTerminalClock();
+}
 
-    if (initialHash && document.getElementById(initialHash)) {
-        const titleMap = {
-            "phc-dashboard": "PHC Edge Node",
-            "staff-attendance-panel": "Nurse & Staff Attendance Management",
-            "district-dashboard": "District Command & Alerts",
-            "redistribution-panel": "Redistribution Engine",
-            "forecasting-panel": "AI Forecasting & Math",
-            "federated-panel": "Federated AI (FedAvg)",
-            "national-dashboard": "National Health Command Center",
-            "national-brics-panel": "BRICS Federated Layer",
-            "privacy-panel": "Privacy & Encryption",
-            "enterprise-panel": "Enterprise Control Center"
-        };
-        switchTab(initialHash, titleMap[initialHash] || null, false);
+function renderUserProfile(user) {
+    const avatar = document.getElementById("nav-user-avatar");
+    const nameEl = document.getElementById("nav-user-name");
+    const roleEl = document.getElementById("nav-user-role");
+    const scopeEl = document.getElementById("nav-user-scope");
+
+    if (avatar) {
+        const initials = user.full_name ? user.full_name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase() : "MD";
+        avatar.innerText = initials;
+    }
+    if (nameEl) nameEl.innerText = user.full_name;
+
+    const roleNameMap = {
+        "NATIONAL_ADMIN": "NATIONAL ADMIN",
+        "DISTRICT_OFFICER": "DISTRICT OFFICER",
+        "PHC_STAFF": "PHC STAFF"
+    };
+    if (roleEl) roleEl.innerText = roleNameMap[user.role] || user.role;
+
+    if (scopeEl) {
+        if (user.role === "NATIONAL_ADMIN") {
+            scopeEl.innerText = "Nationwide";
+        } else if (user.role === "DISTRICT_OFFICER") {
+            scopeEl.innerText = user.assigned_district_id || "District";
+        } else {
+            scopeEl.innerText = user.assigned_phc_id || "PHC";
+        }
+    }
+}
+
+function toggleUserDropdown(e) {
+    if (e) e.stopPropagation();
+    const menu = document.getElementById("user-dropdown-menu");
+    if (menu) menu.classList.toggle("show");
+}
+
+window.addEventListener("click", () => {
+    const menu = document.getElementById("user-dropdown-menu");
+    if (menu && menu.classList.contains("show")) {
+        menu.classList.remove("show");
     }
 });
+
+function renderRoleSidebar(role) {
+    const nav = document.getElementById("sidebar-dynamic-nav");
+    if (!nav) return;
+
+    if (role === "NATIONAL_ADMIN") {
+        nav.innerHTML = `
+            <div class="nav-section-title">CORE PLATFORM</div>
+            <button class="sidebar-btn active" onclick="switchTab('national-dashboard', 'National Health Command Center')">
+                <div class="sidebar-btn-left"><span class="icon">🏛️</span> National Dashboard</div>
+            </button>
+            <button class="sidebar-btn" onclick="switchTab('district-dashboard', 'District Monitoring')">
+                <div class="sidebar-btn-left"><span class="icon">📊</span> District Monitoring</div>
+            </button>
+            <button class="sidebar-btn" onclick="switchTab('phc-dashboard', 'PHC Operational Oversight')">
+                <div class="sidebar-btn-left"><span class="icon">🏥</span> PHC Oversight</div>
+            </button>
+
+            <div class="nav-section-title">INTELLIGENCE & AI</div>
+            <button class="sidebar-btn" onclick="switchTab('forecasting-panel', 'AI Forecasting & Math')">
+                <div class="sidebar-btn-left"><span class="icon">📈</span> AI Forecasting</div>
+            </button>
+            <button class="sidebar-btn" onclick="switchTab('redistribution-panel', 'Redistribution Monitoring')">
+                <div class="sidebar-btn-left"><span class="icon">⚡</span> Redistribution</div>
+                <span class="badge-count" id="redist-count-badge">0</span>
+            </button>
+            <button class="sidebar-btn" onclick="switchTab('federated-panel', 'Federated AI (FedAvg)')">
+                <div class="sidebar-btn-left"><span class="icon">🧬</span> Federated AI</div>
+            </button>
+            <button class="sidebar-btn" onclick="switchTab('national-brics-panel', 'BRICS Federated Layer')">
+                <div class="sidebar-btn-left"><span class="icon">🌍</span> BRICS Layer</div>
+            </button>
+
+            <div class="nav-section-title">ADMINISTRATION & AUDIT</div>
+            <button class="sidebar-btn" onclick="switchTab('user-management-panel', 'User Directory & Access Control')">
+                <div class="sidebar-btn-left"><span class="icon">👥</span> User Management</div>
+            </button>
+            <button class="sidebar-btn" onclick="switchTab('audit-logs-panel', 'National Security Audit Trail')">
+                <div class="sidebar-btn-left"><span class="icon">📜</span> Audit Logs</div>
+            </button>
+            <button class="sidebar-btn" onclick="switchTab('privacy-panel', 'Privacy & Encryption')">
+                <div class="sidebar-btn-left"><span class="icon">🔒</span> Privacy & Compliance</div>
+            </button>
+            <button class="sidebar-btn" onclick="switchTab('enterprise-panel', 'Enterprise Control Center')">
+                <div class="sidebar-btn-left"><span class="icon">⚙️</span> Settings</div>
+            </button>
+        `;
+    } else if (role === "DISTRICT_OFFICER") {
+        nav.innerHTML = `
+            <div class="nav-section-title">DISTRICT PLATFORM</div>
+            <button class="sidebar-btn active" onclick="switchTab('district-dashboard', 'District Command & Alerts')">
+                <div class="sidebar-btn-left"><span class="icon">📊</span> District Dashboard</div>
+            </button>
+            <button class="sidebar-btn" onclick="switchTab('phc-dashboard', 'District PHC Monitoring')">
+                <div class="sidebar-btn-left"><span class="icon">🏥</span> PHC Monitoring</div>
+            </button>
+            <button class="sidebar-btn" onclick="switchTab('staff-attendance-panel', 'Personnel Attendance Monitoring')">
+                <div class="sidebar-btn-left"><span class="icon">🪪</span> Staff Monitoring</div>
+            </button>
+
+            <div class="nav-section-title">SUPPLY CHAIN & PREDICTIONS</div>
+            <button class="sidebar-btn" onclick="switchTab('forecasting-panel', 'AI Demand Forecasting & Alerts')">
+                <div class="sidebar-btn-left"><span class="icon">📈</span> Forecasting & Alerts</div>
+            </button>
+            <button class="sidebar-btn" onclick="switchTab('redistribution-panel', 'Redistribution Transfer Approvals')">
+                <div class="sidebar-btn-left"><span class="icon">⚡</span> Redistribution</div>
+                <span class="badge-count" id="redist-count-badge">0</span>
+            </button>
+
+            <div class="nav-section-title">DISTRICT GOVERNANCE</div>
+            <button class="sidebar-btn" onclick="switchTab('user-management-panel', 'District Staff Accounts')">
+                <div class="sidebar-btn-left"><span class="icon">👥</span> User Management</div>
+            </button>
+            <button class="sidebar-btn" onclick="switchTab('audit-logs-panel', 'District Activity & Audit History')">
+                <div class="sidebar-btn-left"><span class="icon">📜</span> Audit Logs</div>
+            </button>
+        `;
+    } else { // PHC_STAFF
+        nav.innerHTML = `
+            <div class="nav-section-title">PHC OPERATIONS</div>
+            <button class="sidebar-btn active" onclick="switchTab('phc-dashboard', 'PHC Facility Dashboard')">
+                <div class="sidebar-btn-left"><span class="icon">🏥</span> PHC Dashboard</div>
+            </button>
+            <button class="sidebar-btn" onclick="focusInventorySection()">
+                <div class="sidebar-btn-left"><span class="icon">💊</span> Medicine Inventory</div>
+            </button>
+            <button class="sidebar-btn" onclick="focusBedsSection()">
+                <div class="sidebar-btn-left"><span class="icon">🛏️</span> Beds & Resources</div>
+            </button>
+            <button class="sidebar-btn" onclick="switchTab('staff-attendance-panel', 'Nurse & Staff Attendance')">
+                <div class="sidebar-btn-left"><span class="icon">🪪</span> Staff Attendance</div>
+            </button>
+            <button class="sidebar-btn" onclick="switchTab('redistribution-panel', 'Facility Transfer Requests')">
+                <div class="sidebar-btn-left"><span class="icon">⚡</span> Transfer Requests</div>
+                <span class="badge-count" id="redist-count-badge">0</span>
+            </button>
+        `;
+    }
+}
 
 // Support browser Back/Forward navigation with hash routing
 window.addEventListener("hashchange", () => {
@@ -68,8 +340,11 @@ function switchTab(tabId, titleText, updateHash = true) {
     }
 
     if (tabId === 'forecasting-panel') updateForecastView();
-    if (tabId === 'national-dashboard') loadNationalDashboard();
+    if (tabId === 'national-dashboard' && window.currentUser && window.currentUser.role === 'NATIONAL_ADMIN') loadNationalDashboard();
+    if (tabId === 'district-dashboard' && window.currentUser && window.currentUser.role !== 'PHC_STAFF') loadDistrictData();
     if (tabId === 'staff-attendance-panel') loadStaffAttendancePage(activePhcId);
+    if (tabId === 'user-management-panel') loadUsersDirectory();
+    if (tabId === 'audit-logs-panel') loadAuditLogs();
 }
 
 // -------------------------------------------------------------
@@ -79,6 +354,38 @@ async function loadPHCDashboard(phcId) {
     activePhcId = phcId;
     const phcFormInput = document.getElementById("form-phc-id");
     if (phcFormInput) phcFormInput.value = phcId;
+
+    // Supervisor Read-Only Banner check
+    const supervisorBanner = document.getElementById("supervisor-banner");
+    const supervisorText = document.getElementById("supervisor-banner-text");
+    const overrideBtn = document.getElementById("supervisor-override-btn");
+    const stockUpdateBtn = document.querySelector("#stock-update-form button[type='submit']");
+
+    if (window.currentUser) {
+        if (window.currentUser.role === "NATIONAL_ADMIN") {
+            if (supervisorBanner) supervisorBanner.style.display = "flex";
+            if (supervisorText) supervisorText.innerHTML = `<strong>National Admin Monitoring Mode:</strong> You are viewing operational records for <strong>${phcId}</strong>. Operational edits require explicit Administrative Override with written justification.`;
+            if (overrideBtn) overrideBtn.style.display = "inline-block";
+            if (stockUpdateBtn) {
+                stockUpdateBtn.disabled = false;
+                stockUpdateBtn.innerText = "⚠️ Execute Administrative Stock Update";
+            }
+        } else if (window.currentUser.role === "DISTRICT_OFFICER") {
+            if (supervisorBanner) supervisorBanner.style.display = "flex";
+            if (supervisorText) supervisorText.innerHTML = `<strong>District Officer Monitoring Mode:</strong> Viewing facility records for <strong>${phcId}</strong> in Read-Only mode. Operational entries are recorded by facility staff.`;
+            if (overrideBtn) overrideBtn.style.display = "none";
+            if (stockUpdateBtn) {
+                stockUpdateBtn.disabled = true;
+                stockUpdateBtn.innerText = "🔒 Read-Only (Managed by PHC Staff)";
+            }
+        } else {
+            if (supervisorBanner) supervisorBanner.style.display = "none";
+            if (stockUpdateBtn) {
+                stockUpdateBtn.disabled = false;
+                stockUpdateBtn.innerText = "Record Medicine Quantity (Manual/Voice)";
+            }
+        }
+    }
 
     // Update main title dynamically
     const titleMap = {
@@ -278,13 +585,45 @@ function renderFootfallChart(footfallData) {
     });
 }
 
-// Handle Form Submission
+// Handle Form Submission with RBAC and Override Enforcement
 async function handleStockUpdateSubmit(e) {
     e.preventDefault();
     const phcId = document.getElementById("form-phc-id").value;
     const medName = document.getElementById("form-medicine-name").value;
     const qty = parseInt(document.getElementById("form-quantity").value);
     const par = parseInt(document.getElementById("form-par-level").value);
+
+    if (window.currentUser) {
+        if (window.currentUser.role === "DISTRICT_OFFICER") {
+            alert("District Officers monitor inventory and approve transfers. Direct stock records must be submitted by PHC Staff.");
+            return;
+        }
+
+        if (window.currentUser.role === "NATIONAL_ADMIN") {
+            pendingOverrideAction = async (reason) => {
+                try {
+                    const res = await fetch("/api/inventory/update", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ phc_id: phcId, medicine_name: medName, quantity: qty, par_level: par, override_reason: reason })
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                        alert(data.detail || "Administrative override failed.");
+                        return;
+                    }
+                    alert(`[ADMINISTRATIVE OVERRIDE EXECUTED]\n${data.message}`);
+                    loadPHCDashboard(phcId);
+                    loadDistrictData();
+                    loadRedistributionRecommendations();
+                } catch (err) {
+                    alert("Network error executing administrative override.");
+                }
+            };
+            openOverrideModal(`Update Inventory: ${phcId} — ${medName} to ${qty} units (Par: ${par})`);
+            return;
+        }
+    }
 
     try {
         const res = await fetch("/api/inventory/update", {
@@ -293,11 +632,17 @@ async function handleStockUpdateSubmit(e) {
             body: JSON.stringify({ phc_id: phcId, medicine_name: medName, quantity: qty, par_level: par })
         });
         const data = await res.json();
+        if (!res.ok) {
+            alert(data.detail || "Failed to update inventory.");
+            return;
+        }
         alert(data.message);
         
         // Instant refresh
         loadPHCDashboard(phcId);
-        loadDistrictData();
+        if (window.currentUser && window.currentUser.role !== "PHC_STAFF") {
+            loadDistrictData();
+        }
         loadRedistributionRecommendations();
     } catch (err) {
         alert("Failed to update inventory.");
@@ -1672,5 +2017,587 @@ function playTerminalChime(isSuccess) {
         // AudioContext audio output
     }
 }
+
+// ==========================================================================
+// SCOPED PHC & DISTRICT SELECTORS
+// ==========================================================================
+function setupScopedPhcSelector() {
+    const phcSelect = document.getElementById("phc-select");
+    if (!phcSelect || !window.currentUser) return;
+
+    phcSelect.innerHTML = "";
+    const user = window.currentUser;
+
+    const allPhcs = [
+        { id: "PHC-001", name: "PHC Rampur (Alpha Sector)", district: "DIST-NORTH" },
+        { id: "PHC-002", name: "PHC Beta Central", district: "DIST-NORTH" },
+        { id: "PHC-003", name: "PHC Gamma Rural", district: "DIST-SOUTH" },
+        { id: "PHC-004", name: "PHC Delta Community", district: "DIST-SOUTH" }
+    ];
+
+    let allowed = [];
+    if (user.role === "NATIONAL_ADMIN") {
+        allowed = allPhcs;
+        phcSelect.disabled = false;
+    } else if (user.role === "DISTRICT_OFFICER") {
+        allowed = allPhcs.filter(p => p.district === user.assigned_district_id);
+        phcSelect.disabled = false;
+    } else { // PHC_STAFF
+        allowed = allPhcs.filter(p => p.id === user.assigned_phc_id);
+        phcSelect.disabled = true;
+    }
+
+    allowed.forEach(p => {
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        opt.innerText = p.name;
+        if (p.id === activePhcId) opt.selected = true;
+        phcSelect.appendChild(opt);
+    });
+}
+
+function focusInventorySection() {
+    switchTab('phc-dashboard', 'PHC Facility Dashboard');
+    const el = document.getElementById("stock-update-form");
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
+}
+
+function focusBedsSection() {
+    switchTab('phc-dashboard', 'PHC Facility Dashboard');
+    const el = document.getElementById("phc-bed-value");
+    if (el) el.scrollIntoView({ behavior: 'smooth' });
+}
+
+// ==========================================================================
+// USER MANAGEMENT PANEL
+// ==========================================================================
+let allLoadedUsers = [];
+
+async function loadUsersDirectory() {
+    const tbody = document.getElementById("users-table-body");
+    if (!tbody) return;
+
+    try {
+        const res = await fetch("/api/users");
+        if (!res.ok) {
+            tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--accent-rose);">Unauthorized to view user directory.</td></tr>`;
+            return;
+        }
+        allLoadedUsers = await res.json();
+        renderUsersTable(allLoadedUsers);
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--accent-rose);">Failed to load user records.</td></tr>`;
+    }
+}
+
+function renderUsersTable(users) {
+    const tbody = document.getElementById("users-table-body");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    if (users.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align:center; color:var(--text-muted); padding:24px;">No user accounts found matching criteria.</td></tr>`;
+        return;
+    }
+
+    users.forEach(u => {
+        const tr = document.createElement("tr");
+
+        let roleBadge = `<span class="badge-role staff">PHC STAFF</span>`;
+        if (u.role === "NATIONAL_ADMIN") roleBadge = `<span class="badge-role admin">NATIONAL ADMIN</span>`;
+        else if (u.role === "DISTRICT_OFFICER") roleBadge = `<span class="badge-role officer">DISTRICT OFFICER</span>`;
+
+        let statusBadge = u.account_status === "ACTIVE" 
+            ? `<span class="badge-status active">ACTIVE</span>` 
+            : `<span class="badge-status disabled">DISABLED</span>`;
+
+        let pwdBadge = u.must_change_password 
+            ? `<span style="font-size:0.7rem; color:#D97706; font-weight:600;">⚠️ TEMP</span>` 
+            : `<span style="font-size:0.7rem; color:#16A34A; font-weight:600;">✓ SET</span>`;
+
+        let scopeText = "Nationwide";
+        if (u.role === "DISTRICT_OFFICER") scopeText = u.assigned_district_id || "District";
+        else if (u.role === "PHC_STAFF") scopeText = `${u.assigned_phc_id || "PHC"} (${u.assigned_district_id || "District"})`;
+
+        const isSelf = window.currentUser && window.currentUser.id === u.id;
+        const isTargetAdmin = u.role === "NATIONAL_ADMIN";
+
+        let actionHtml = "--";
+        if (!isSelf && !isTargetAdmin) {
+            const nextStatus = u.account_status === "ACTIVE" ? "DISABLED" : "ACTIVE";
+            const btnClass = u.account_status === "ACTIVE" ? "danger" : "primary";
+            const btnLabel = u.account_status === "ACTIVE" ? "Deactivate" : "Activate";
+            actionHtml = `<button class="btn-table-action ${btnClass}" onclick="toggleUserStatus('${u.id}', '${nextStatus}')">${btnLabel}</button>`;
+        }
+
+        tr.innerHTML = `
+            <td>
+                <strong>${u.full_name}</strong><br>
+                <span style="font-size:0.75rem; color:var(--text-muted);">${u.email}</span>
+            </td>
+            <td><code style="font-size:0.75rem;">${u.employee_id || "--"}</code></td>
+            <td>${roleBadge}</td>
+            <td><strong>${scopeText}</strong></td>
+            <td>${statusBadge}</td>
+            <td>${pwdBadge}</td>
+            <td style="font-size:0.75rem; color:var(--text-muted);">${u.last_login ? formatTime(u.last_login) : "Never"}</td>
+            <td>${actionHtml}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function filterUsersTable(type, btn) {
+    document.querySelectorAll("#user-management-panel .filter-pill").forEach(p => p.classList.remove("active"));
+    if (btn) btn.classList.add("active");
+
+    if (type === "ALL") {
+        renderUsersTable(allLoadedUsers);
+    } else if (type === "ACTIVE" || type === "DISABLED") {
+        renderUsersTable(allLoadedUsers.filter(u => u.account_status === type));
+    } else {
+        renderUsersTable(allLoadedUsers.filter(u => u.role === type));
+    }
+}
+
+async function toggleUserStatus(userId, newStatus) {
+    if (!confirm(`Are you sure you want to set this account to ${newStatus}?`)) return;
+    try {
+        const res = await fetch(`/api/users/${userId}/status`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ account_status: newStatus })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            alert(data.detail || "Failed to update user status.");
+            return;
+        }
+        alert(data.message);
+        loadUsersDirectory();
+    } catch (e) {
+        alert("Error connecting to server.");
+    }
+}
+
+function openCreateUserModal() {
+    const modal = document.getElementById("create-user-modal");
+    if (!modal) return;
+    modal.classList.add("active");
+
+    const roleSelect = document.getElementById("new-user-role");
+    const distGroup = document.getElementById("new-user-district-group");
+    const phcGroup = document.getElementById("new-user-phc-group");
+
+    if (window.currentUser && window.currentUser.role === "DISTRICT_OFFICER") {
+        if (roleSelect) {
+            roleSelect.innerHTML = `<option value="PHC_STAFF">PHC Staff (Facility Operations)</option>`;
+        }
+        if (distGroup) distGroup.style.display = "none";
+        if (phcGroup) {
+            phcGroup.style.display = "block";
+            updateNewUserPhcOptions(window.currentUser.assigned_district_id);
+        }
+    } else {
+        if (roleSelect) {
+            roleSelect.innerHTML = `
+                <option value="DISTRICT_OFFICER">District Officer (District Administration)</option>
+                <option value="PHC_STAFF">PHC Staff (Facility Operations)</option>
+            `;
+        }
+        if (distGroup) distGroup.style.display = "block";
+        handleNewUserRoleChange("DISTRICT_OFFICER");
+    }
+}
+
+function closeCreateUserModal() {
+    const modal = document.getElementById("create-user-modal");
+    if (modal) modal.classList.remove("active");
+}
+
+function handleNewUserRoleChange(role) {
+    const phcGroup = document.getElementById("new-user-phc-group");
+    const distSelect = document.getElementById("new-user-district");
+    if (phcGroup) {
+        phcGroup.style.display = role === "PHC_STAFF" ? "block" : "none";
+    }
+    if (role === "PHC_STAFF" && distSelect) {
+        updateNewUserPhcOptions(distSelect.value);
+    }
+}
+
+function updateNewUserPhcOptions(districtId) {
+    const phcSelect = document.getElementById("new-user-phc");
+    if (!phcSelect) return;
+    phcSelect.innerHTML = "";
+
+    if (districtId === "DIST-NORTH") {
+        phcSelect.innerHTML = `
+            <option value="PHC-001">Alpha Sector PHC (PHC-001)</option>
+            <option value="PHC-002">Beta Central PHC (PHC-002)</option>
+        `;
+    } else {
+        phcSelect.innerHTML = `
+            <option value="PHC-003">Gamma Rural PHC (PHC-003)</option>
+            <option value="PHC-004">Delta Community PHC (PHC-004)</option>
+        `;
+    }
+}
+
+async function submitCreateUser() {
+    const name = document.getElementById("new-user-name").value.trim();
+    const email = document.getElementById("new-user-email").value.trim();
+    const role = document.getElementById("new-user-role").value;
+    const district = document.getElementById("new-user-district") ? document.getElementById("new-user-district").value : null;
+    const phc = (role === "PHC_STAFF" && document.getElementById("new-user-phc")) ? document.getElementById("new-user-phc").value : null;
+    const tempPwd = document.getElementById("new-user-temp-pwd").value;
+    const errBox = document.getElementById("create-user-error");
+
+    if (!name || !email) {
+        if (errBox) {
+            errBox.innerText = "Name and official email are mandatory.";
+            errBox.style.display = "block";
+        }
+        return;
+    }
+
+    try {
+        const res = await fetch("/api/users", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                full_name: name,
+                email: email,
+                role: role,
+                assigned_district_id: district,
+                assigned_phc_id: phc,
+                initial_password: tempPwd
+            })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            if (errBox) {
+                errBox.innerText = data.detail || "Account creation failed.";
+                errBox.style.display = "block";
+            }
+            return;
+        }
+
+        alert(`[USER ACCOUNT CREATED]\n${data.message}`);
+        closeCreateUserModal();
+        loadUsersDirectory();
+    } catch (e) {
+        if (errBox) {
+            errBox.innerText = "Network failure creating user.";
+            errBox.style.display = "block";
+        }
+    }
+}
+
+// ==========================================================================
+// AUDIT LOGS PANEL
+// ==========================================================================
+let allLoadedAuditLogs = [];
+
+async function loadAuditLogs() {
+    const tbody = document.getElementById("audit-table-body");
+    const countLabel = document.getElementById("audit-count-label");
+    if (!tbody) return;
+
+    try {
+        const res = await fetch("/api/audit-logs?limit=100");
+        if (!res.ok) {
+            tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--accent-rose);">Unauthorized to view audit logs.</td></tr>`;
+            return;
+        }
+        allLoadedAuditLogs = await res.json();
+        if (countLabel) countLabel.innerText = `Showing ${allLoadedAuditLogs.length} recent events`;
+        renderAuditTable(allLoadedAuditLogs);
+    } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--accent-rose);">Failed to retrieve audit trail.</td></tr>`;
+    }
+}
+
+function renderAuditTable(logs) {
+    const tbody = document.getElementById("audit-table-body");
+    if (!tbody) return;
+    tbody.innerHTML = "";
+
+    if (logs.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align:center; color:var(--text-muted); padding:24px;">No audit records found matching criteria.</td></tr>`;
+        return;
+    }
+
+    logs.forEach(log => {
+        const tr = document.createElement("tr");
+
+        let resBadge = `<span class="badge-result success">SUCCESS</span>`;
+        if (log.result === "OVERRIDDEN") resBadge = `<span class="badge-result overridden">OVERRIDDEN</span>`;
+        else if (log.result === "DENIED") resBadge = `<span class="badge-result denied">DENIED</span>`;
+        else if (log.result === "FAILURE") resBadge = `<span class="badge-result failure">FAILURE</span>`;
+
+        let scopeDisplay = "Global";
+        if (log.phc_scope) scopeDisplay = log.phc_scope;
+        else if (log.district_scope) scopeDisplay = log.district_scope;
+
+        tr.innerHTML = `
+            <td><span style="font-family:var(--font-mono); font-size:0.75rem;">${formatTime(log.timestamp)}</span></td>
+            <td>
+                <strong>${log.user_name || log.user_id}</strong><br>
+                <span style="font-size:0.7rem; color:var(--text-muted); text-transform:uppercase;">${log.role}</span>
+            </td>
+            <td><code>${log.action}</code></td>
+            <td style="font-size:0.8rem;">${log.target_record || "--"}</td>
+            <td><strong>${scopeDisplay}</strong></td>
+            <td>${resBadge}</td>
+            <td style="font-size:0.8rem; color:#475569; max-width:280px;">${log.reason || "--"}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function filterAuditTable(type, btn) {
+    document.querySelectorAll("#audit-logs-panel .filter-pill").forEach(p => p.classList.remove("active"));
+    if (btn) btn.classList.add("active");
+
+    if (type === "ALL") {
+        renderAuditTable(allLoadedAuditLogs);
+    } else if (type === "LOGIN") {
+        renderAuditTable(allLoadedAuditLogs.filter(l => l.action.includes("LOGIN") || l.action.includes("LOGOUT")));
+    } else if (type === "OVERRIDDEN") {
+        renderAuditTable(allLoadedAuditLogs.filter(l => l.result === "OVERRIDDEN" || l.action.includes("OVERRIDE")));
+    } else if (type === "DENIED") {
+        renderAuditTable(allLoadedAuditLogs.filter(l => l.result === "DENIED" || l.result === "FAILURE"));
+    } else if (type === "TRANSFER") {
+        renderAuditTable(allLoadedAuditLogs.filter(l => l.action.includes("TRANSFER") || l.action.includes("REDIST")));
+    }
+}
+
+// ==========================================================================
+// ADMINISTRATIVE OVERRIDE MODAL
+// ==========================================================================
+function openOverrideModal(summaryText) {
+    const modal = document.getElementById("admin-override-modal");
+    const sumEl = document.getElementById("override-target-summary");
+    const reasonInput = document.getElementById("override-reason-input");
+    const confirmCheck = document.getElementById("override-confirm-checkbox");
+
+    if (sumEl) sumEl.innerText = summaryText || "Operational Modification";
+    if (reasonInput) reasonInput.value = "";
+    if (confirmCheck) confirmCheck.checked = false;
+    if (modal) modal.classList.add("active");
+}
+
+function closeOverrideModal() {
+    const modal = document.getElementById("admin-override-modal");
+    if (modal) modal.classList.remove("active");
+    pendingOverrideAction = null;
+}
+
+async function submitPendingOverride() {
+    const reason = document.getElementById("override-reason-input").value.trim();
+    const confirmed = document.getElementById("override-confirm-checkbox").checked;
+
+    if (!reason || reason.length < 3) {
+        alert("A written explanation is strictly mandatory for administrative overrides.");
+        return;
+    }
+    if (!confirmed) {
+        alert("You must check the confirmation box acknowledging this override.");
+        return;
+    }
+
+    const actionToRun = pendingOverrideAction;
+    closeOverrideModal();
+
+    if (actionToRun) {
+        await actionToRun(reason);
+    }
+}
+
+// ==========================================================================
+// CHANGE PASSWORD MODAL
+// ==========================================================================
+function openChangePasswordModal(isMandatory = false) {
+    const modal = document.getElementById("change-password-modal");
+    const alertBox = document.getElementById("must-change-pwd-alert");
+    const closeBtn = document.getElementById("change-pwd-close-btn");
+    const cancelBtn = document.getElementById("change-pwd-cancel-btn");
+    const errBox = document.getElementById("pwd-error-msg");
+
+    if (errBox) errBox.style.display = "none";
+
+    if (isMandatory) {
+        if (alertBox) alertBox.style.display = "block";
+        if (closeBtn) closeBtn.style.display = "none";
+        if (cancelBtn) cancelBtn.style.display = "none";
+    } else {
+        if (alertBox) alertBox.style.display = "none";
+        if (closeBtn) closeBtn.style.display = "block";
+        if (cancelBtn) cancelBtn.style.display = "block";
+    }
+
+    if (modal) modal.classList.add("active");
+}
+
+function closeChangePasswordModal() {
+    const modal = document.getElementById("change-password-modal");
+    if (modal) modal.classList.remove("active");
+}
+
+async function submitChangePassword() {
+    const oldP = document.getElementById("pwd-old").value;
+    const newP = document.getElementById("pwd-new").value;
+    const confirmP = document.getElementById("pwd-confirm").value;
+    const errBox = document.getElementById("pwd-error-msg");
+
+    if (errBox) errBox.style.display = "none";
+
+    if (!oldP || !newP) {
+        if (errBox) {
+            errBox.innerText = "All password fields are required.";
+            errBox.style.display = "block";
+        }
+        return;
+    }
+    if (newP.length < 6) {
+        if (errBox) {
+            errBox.innerText = "New password must be at least 6 characters long.";
+            errBox.style.display = "block";
+        }
+        return;
+    }
+    if (newP !== confirmP) {
+        if (errBox) {
+            errBox.innerText = "New passwords do not match.";
+            errBox.style.display = "block";
+        }
+        return;
+    }
+
+    try {
+        const res = await fetch("/api/auth/change-password", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ old_password: oldP, new_password: newP })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            if (errBox) {
+                errBox.innerText = data.detail || "Failed to change password.";
+                errBox.style.display = "block";
+            }
+            return;
+        }
+
+        alert("Password updated successfully!");
+        if (window.currentUser) window.currentUser.must_change_password = false;
+        closeChangePasswordModal();
+    } catch (e) {
+        if (errBox) {
+            errBox.innerText = "Network error updating password.";
+            errBox.style.display = "block";
+        }
+    }
+}
+
+// ==========================================================================
+// FORGOT & RESET PASSWORD (DEMO)
+// ==========================================================================
+let activeResetToken = "";
+
+function openForgotPasswordModal() {
+    const modal = document.getElementById("forgot-password-modal");
+    const resBox = document.getElementById("forgot-token-result");
+    const input = document.getElementById("forgot-email-input");
+    if (resBox) resBox.style.display = "none";
+    if (input) input.value = document.getElementById("login-username") ? document.getElementById("login-username").value : "";
+    if (modal) modal.classList.add("active");
+}
+
+function closeForgotPasswordModal() {
+    const modal = document.getElementById("forgot-password-modal");
+    if (modal) modal.classList.remove("active");
+}
+
+async function submitForgotPasswordRequest() {
+    const email = document.getElementById("forgot-email-input").value.trim();
+    if (!email) {
+        alert("Please enter a registered email address.");
+        return;
+    }
+
+    try {
+        const res = await fetch("/api/auth/forgot-password", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email: email })
+        });
+        const data = await res.json();
+        if (data.demo_reset_token) {
+            activeResetToken = data.demo_reset_token;
+            const resBox = document.getElementById("forgot-token-result");
+            const codeEl = document.getElementById("forgot-token-code");
+            if (codeEl) codeEl.innerText = activeResetToken;
+            if (resBox) resBox.style.display = "block";
+        } else {
+            alert(data.message);
+        }
+    } catch (e) {
+        alert("Error requesting password recovery.");
+    }
+}
+
+async function submitResetPasswordWithToken() {
+    const newPwd = document.getElementById("forgot-new-pwd").value;
+    if (!newPwd || newPwd.length < 6) {
+        alert("Password must be at least 6 characters.");
+        return;
+    }
+
+    try {
+        const res = await fetch("/api/auth/reset-password", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token: activeResetToken, new_password: newPwd })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+            alert(data.detail || "Password reset failed.");
+            return;
+        }
+        alert(data.message);
+        closeForgotPasswordModal();
+    } catch (e) {
+        alert("Network error resetting password.");
+    }
+}
+
+// ==========================================================================
+// PROFILE MODAL
+// ==========================================================================
+function openProfileModal() {
+    const modal = document.getElementById("profile-modal");
+    const u = window.currentUser;
+    if (!u || !modal) return;
+
+    document.getElementById("modal-profile-name").innerText = u.full_name;
+    document.getElementById("modal-profile-avatar").innerText = u.full_name ? u.full_name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase() : "MD";
+    document.getElementById("modal-profile-role").innerText = u.role.replace("_", " ");
+    document.getElementById("modal-profile-id").innerText = u.id;
+    document.getElementById("modal-profile-email").innerText = u.email;
+    document.getElementById("modal-profile-emp-id").innerText = u.employee_id || "--";
+    document.getElementById("modal-profile-district").innerText = u.assigned_district_id || "All Districts (National)";
+    document.getElementById("modal-profile-phc").innerText = u.assigned_phc_id || "All Facilities (National/District)";
+    document.getElementById("modal-profile-last-login").innerText = u.last_login ? formatTime(u.last_login) : "Just now";
+
+    modal.classList.add("active");
+}
+
+function closeProfileModal() {
+    const modal = document.getElementById("profile-modal");
+    if (modal) modal.classList.remove("active");
+}
+
 
 

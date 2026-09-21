@@ -3,492 +3,2358 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MERIDIAN — Federated AI Public Health Supply Chain Platform</title>
-    <!-- Google Fonts -->
+    <title>MERIDIAN — Healthcare Command & Resource Management Platform</title>
+    <!-- Google Fonts: Inter & JetBrains Mono -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v=2026.4">
 </head>
 <body>
-    <div class="app-container">
-        <!-- Top Navigation Header -->
-        <header class="top-header">
-            <div class="brand">
-                <div class="logo-icon">🌐</div>
+    <!-- ACCESSIBLE TOAST NOTIFICATION CONTAINER -->
+    <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+
+    <!-- 0. SECURE MERIDIAN AUTHENTICATION OVERLAY -->
+    <div id="login-overlay" class="login-overlay">
+        <div class="login-card">
+            <div class="login-brand">
+                <div class="brand-icon">🌐</div>
                 <div>
-                    <h1 class="brand-title">MERIDIAN</h1>
-                    <p class="brand-subtitle">Federated AI Public Health Supply Chain Platform</p>
+                    <div class="login-title">MERIDIAN</div>
+                    <div class="login-subtitle">Healthcare Resource-Management Command</div>
                 </div>
             </div>
-            
-            <div class="header-right">
-                <div class="status-indicator">
+
+            <!-- Login Alert Notification -->
+            <div id="login-alert" class="login-alert" style="display:none;">
+                <span id="login-alert-icon">⚠️</span>
+                <span id="login-alert-text">Invalid credentials</span>
+            </div>
+
+            <form id="login-form" class="login-form" onsubmit="handleLoginSubmit(event)">
+                <div class="login-input-group">
+                    <label class="login-label" for="login-username">
+                        <span>Email or Employee ID</span>
+                    </label>
+                    <div class="login-input-wrap">
+                        <input type="text" id="login-username" class="login-input" placeholder="e.g. admin@meridian.health" required autocomplete="username">
+                    </div>
+                </div>
+
+                <div class="login-input-group">
+                    <label class="login-label" for="login-password">
+                        <span>Password</span>
+                        <a href="javascript:void(0)" class="login-forgot-link" onclick="openForgotPasswordModal()">Forgot password?</a>
+                    </label>
+                    <div class="login-input-wrap">
+                        <input type="password" id="login-password" class="login-input" placeholder="••••••••••••" required autocomplete="current-password">
+                        <button type="button" class="login-toggle-pwd" onclick="toggleLoginPasswordVisibility()" title="Show/Hide Password">👁️</button>
+                    </div>
+                </div>
+
+                <div class="login-options">
+                    <label class="login-remember">
+                        <input type="checkbox" id="login-remember-me">
+                        <span>Remember me for 7 days</span>
+                    </label>
+                </div>
+
+                <button type="submit" id="login-submit-btn" class="login-btn">
+                    <span id="login-btn-spinner" style="display:none;">⏳</span>
+                    <span id="login-btn-text">Sign In to Meridian</span>
+                </button>
+            </form>
+
+            <!-- Quick Demo Credentials Box -->
+            <div class="demo-accounts-box" id="demo-access-box">
+                <div class="demo-title">
+                    <span>⚡ Demo Access</span>
+                    <span style="font-size:0.65rem; color:var(--primary-teal);">1-Click Safe Sign In</span>
+                </div>
+                <div class="demo-pills-grid">
+                    <button type="button" class="demo-pill-btn" onclick="quickFillCredentials('admin@meridian.health', 'Admin@123')">
+                        <span>🏛️ National Admin</span>
+                        <span class="demo-pill-role">Nationwide Scope</span>
+                    </button>
+                    <button type="button" class="demo-pill-btn" onclick="quickFillCredentials('officer.north@meridian.health', 'Officer@123')">
+                        <span>📊 District Officer (N)</span>
+                        <span class="demo-pill-role">District North (PHC 1 & 2)</span>
+                    </button>
+                    <button type="button" class="demo-pill-btn" onclick="quickFillCredentials('officer.south@meridian.health', 'Officer@123')">
+                        <span>📊 District Officer (S)</span>
+                        <span class="demo-pill-role">District South (PHC 3 & 4)</span>
+                    </button>
+                    <button type="button" class="demo-pill-btn" onclick="quickFillCredentials('staff.alpha@meridian.health', 'Staff@123')">
+                        <span>🏥 PHC Staff (Alpha)</span>
+                        <span class="demo-pill-role">Alpha Node (PHC-001)</span>
+                    </button>
+                    <button type="button" class="demo-pill-btn" onclick="quickFillCredentials('staff.beta@meridian.health', 'Staff@123')">
+                        <span>🏥 PHC Staff (Beta)</span>
+                        <span class="demo-pill-role">Beta Node (PHC-002)</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN APP SHELL -->
+    <div class="app-layout" id="app-layout" style="display:none;">
+        
+        <!-- FIXED LEFT SIDEBAR: EXACTLY 4 UNIFIED SECTIONS FOR ALL ROLES -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="brand-icon">🌐</div>
+                <div class="brand-title-group">
+                    <span class="brand-name">MERIDIAN</span>
+                    <span class="brand-ver" id="sidebar-role-ver">COMMAND</span>
+                </div>
+            </div>
+
+            <div class="sidebar-scope-card">
+                <div class="scope-label">ACTIVE JURISDICTION</div>
+                <div class="scope-name" id="sidebar-scope-name">National Command</div>
+                <div class="scope-sub" id="sidebar-scope-sub">All Districts & Facilities</div>
+            </div>
+
+            <!-- THE 4 MAIN NAVIGATION SECTIONS -->
+            <nav class="sidebar-nav" id="sidebar-main-nav">
+                <a href="javascript:void(0)" class="nav-item active" id="nav-dashboard" onclick="switchMainTab('dashboard')">
+                    <div class="nav-item-main">
+                        <span class="nav-icon">📊</span>
+                        <span class="nav-label">Dashboard</span>
+                    </div>
+                </a>
+                <a href="javascript:void(0)" class="nav-item" id="nav-operations" onclick="switchMainTab('operations')">
+                    <div class="nav-item-main">
+                        <span class="nav-icon">⚡</span>
+                        <span class="nav-label">Operations</span>
+                    </div>
+                </a>
+                <a href="javascript:void(0)" class="nav-item" id="nav-transfers" onclick="switchMainTab('transfers')">
+                    <div class="nav-item-main">
+                        <span class="nav-icon">🔄</span>
+                        <span class="nav-label">Alerts & Transfers</span>
+                    </div>
+                    <span id="sidebar-transfers-badge" class="badge-count" style="display:none;">0</span>
+                </a>
+                <a href="javascript:void(0)" class="nav-item" id="nav-communication" onclick="switchMainTab('communication')">
+                    <div class="nav-item-main">
+                        <span class="nav-icon">💬</span>
+                        <span class="nav-label">Communication & Reports</span>
+                    </div>
+                    <span id="sidebar-messages-badge" class="badge-count" style="display:none;">0</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <div class="status-live-chip">
                     <span class="pulse-dot"></span>
-                    <span id="system-status-text">System Live • Localhost MVP</span>
+                    <span>Live Secure Node</span>
                 </div>
-                <div class="node-badge">
-                    <span>Node: <strong>PHC-001 (Alpha)</strong></span>
-                </div>
+                <div style="font-size:0.7rem; color:var(--text-muted); margin-top:4px;">Meridian v2.1 Enterprise</div>
             </div>
-        </header>
+        </aside>
 
-        <!-- Navigation Tabs -->
-        <nav class="nav-tabs">
-            <button class="nav-btn active" onclick="switchTab('phc-dashboard')">
-                <span class="icon">🏥</span> PHC Edge Node
-            </button>
-            <button class="nav-btn" onclick="switchTab('district-dashboard')">
-                <span class="icon">📊</span> District Command & Alerts
-            </button>
-            <button class="nav-btn" onclick="switchTab('redistribution-panel')">
-                <span class="icon">⚡</span> Redistribution Engine
-                <span class="badge-count" id="redist-count-badge">0</span>
-            </button>
-            <button class="nav-btn" onclick="switchTab('forecasting-panel')">
-                <span class="icon">📈</span> AI Forecasting & Math
-            </button>
-            <button class="nav-btn" onclick="switchTab('federated-panel')">
-                <span class="icon">🧬</span> Federated AI (FedAvg)
-            </button>
-            <button class="nav-btn" onclick="switchTab('national-brics-panel')">
-                <span class="icon">🌍</span> National & BRICS Layer
-            </button>
-            <button class="nav-btn" onclick="switchTab('privacy-panel')">
-                <span class="icon">🔒</span> Privacy & Encryption
-            </button>
-        </nav>
-
-        <!-- MAIN CONTENT AREA -->
-        <main class="main-content">
+        <!-- MAIN WRAPPER (TOP NAV + VIEWPORT) -->
+        <div class="main-wrapper">
             
-            <!-- 1. PHC EDGE DASHBOARD -->
-            <section id="phc-dashboard" class="tab-content active">
-                <div class="section-header">
-                    <h2>Primary Health Centre (PHC) Edge Dashboard</h2>
-                    <div class="phc-selector-group">
-                        <label for="phc-select">Select Active PHC Node:</label>
-                        <select id="phc-select" onchange="loadPHCDashboard(this.value)">
-                            <option value="PHC-001" selected>PHC-001 (Alpha Sector - High Risk)</option>
-                            <option value="PHC-002">PHC-002 (Beta Central - Surplus Donor)</option>
-                            <option value="PHC-003">PHC-003 (Gamma Rural - Brazil Simulated)</option>
-                            <option value="PHC-004">PHC-004 (Delta Community - S. Africa Simulated)</option>
+            <!-- TOP NAVBAR -->
+            <header class="top-navbar">
+                <div class="top-navbar-left">
+                    <div class="breadcrumb-trail">
+                        <span style="color:var(--accent-teal); font-weight:700;">MERIDIAN</span>
+                        <span>/</span>
+                        <span class="breadcrumb-active" id="current-section-title">Dashboard</span>
+                    </div>
+
+                    <!-- Facility Switcher (Visible to District Officer & National Admin) -->
+                    <div id="top-facility-selector-wrap" class="top-facility-selector" style="display:none;">
+                        <label for="top-facility-selector" style="font-size:0.75rem; font-weight:600; color:var(--text-secondary);">Facility:</label>
+                        <select id="top-facility-selector" class="facility-select" onchange="handleTopFacilityChange(this.value)">
+                            <option value="PHC-001">PHC-001 (Alpha)</option>
+                            <option value="PHC-002">PHC-002 (Beta)</option>
+                            <option value="PHC-003">PHC-003 (Gamma)</option>
+                            <option value="PHC-004">PHC-004 (Delta)</option>
                         </select>
                     </div>
                 </div>
 
-                <div class="metrics-grid">
-                    <div class="metric-card">
-                        <div class="metric-header">
-                            <span>Total Stock Items</span>
-                            <span class="metric-icon">📦</span>
-                        </div>
-                        <div class="metric-value" id="phc-total-stock">--</div>
-                        <div class="metric-sub" id="phc-critical-count">0 items below 30% par</div>
+                <div class="top-navbar-right">
+                    <!-- Demo Environment Indicator Badge -->
+                    <div id="demo-environment-badge" class="demo-environment-badge" style="display:none;" title="Operating in demonstration mode with fictional records">
+                        <span class="demo-badge-dot"></span>
+                        <span>Demo Environment</span>
                     </div>
 
-                    <div class="metric-card">
-                        <div class="metric-header">
-                            <span>Bed Occupancy</span>
-                            <span class="metric-icon">🛏️</span>
-                        </div>
-                        <div class="metric-value" id="phc-bed-value">--</div>
-                        <div class="metric-sub" id="phc-bed-sub">--% occupied</div>
+                    <!-- Dynamic Operational Discipline Strip Badge -->
+                    <div id="discipline-alert-chip" class="discipline-chip normal" onclick="switchMainTab('communication')" title="Click to view accountability indicators">
+                        <span id="discipline-chip-icon">🛡️</span>
+                        <span id="discipline-chip-text">All Systems Compliant</span>
                     </div>
 
-                    <div class="metric-card">
-                        <div class="metric-header">
-                            <span>Staff Present Today</span>
-                            <span class="metric-icon">🩺</span>
+                    <!-- USER PROFILE BADGE & ACCOUNT MENU -->
+                    <div class="user-menu-container" id="user-menu-container">
+                        <button type="button" class="user-profile-badge" id="user-profile-trigger"
+                                aria-haspopup="true" aria-expanded="false" aria-controls="user-dropdown-menu"
+                                onclick="toggleUserDropdown(event)" onkeydown="handleUserBadgeKeydown(event)">
+                            <div class="user-avatar" id="nav-user-avatar">NA</div>
+                            <div class="user-details">
+                                <span class="user-name" id="nav-user-name">Loading...</span>
+                                <div style="display:flex; align-items:center; gap:4px;">
+                                    <span class="user-role-badge" id="nav-user-role">STAFF</span>
+                                    <span class="user-scope-chip" id="nav-user-scope">PHC-001</span>
+                                </div>
+                            </div>
+                            <span class="user-dropdown-arrow" id="user-dropdown-arrow">▼</span>
+                        </button>
+
+                        <!-- Dropdown Menu -->
+                        <div class="user-dropdown-menu" id="user-dropdown-menu" role="menu" aria-label="User account menu">
+                            <div class="dropdown-user-header">
+                                <div style="font-weight:700; color:#0F172A;" id="dropdown-full-name">--</div>
+                                <div style="font-size:0.75rem; color:#64748B;" id="dropdown-email">--</div>
+                            </div>
+                            <div class="user-dropdown-divider"></div>
+                            <button type="button" class="user-dropdown-item" role="menuitem" tabindex="0" onclick="openProfileModal(); closeUserDropdown();">
+                                <span>👤</span> Profile
+                            </button>
+                            <button type="button" class="user-dropdown-item" role="menuitem" tabindex="0" onclick="openChangePasswordModal(); closeUserDropdown();">
+                                <span>🔑</span> Change Password
+                            </button>
+                            <button type="button" class="user-dropdown-item" id="menu-switch-demo-btn" role="menuitem" tabindex="0" onclick="handleSwitchDemoAccount()">
+                                <span>⚡</span> Switch Demo Account
+                            </button>
+                            <div id="dropdown-admin-actions" style="display:none;">
+                                <div class="user-dropdown-divider"></div>
+                                <button type="button" class="user-dropdown-item" role="menuitem" tabindex="0" onclick="openUserDirectoryModal(); closeUserDropdown();">
+                                    <span>👥</span> User Directory
+                                </button>
+                                <button type="button" class="user-dropdown-item" role="menuitem" tabindex="0" onclick="openAuditLogsModal(); closeUserDropdown();">
+                                    <span>📜</span> System Audit Logs
+                                </button>
+                                <button type="button" class="user-dropdown-item" id="menu-demo-reset-btn" role="menuitem" tabindex="0" onclick="openDemoResetModal(); closeUserDropdown();">
+                                    <span>🔄</span> Reset Demo Dataset
+                                </button>
+                            </div>
+                            <div class="user-dropdown-divider"></div>
+                            <button type="button" class="user-dropdown-item danger" role="menuitem" tabindex="0" onclick="handleLogout()">
+                                <span>🚪</span> Logout
+                            </button>
                         </div>
-                        <div class="metric-value" id="phc-staff-value">--</div>
-                        <div class="metric-sub">Fernet Encrypted Identifiers</div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- MAIN VIEW CONTAINER -->
+            <main class="view-content">
+
+                <!-- SUPERVISOR READ-ONLY MONITORING BANNER -->
+                <div id="supervisor-banner" class="supervisor-monitoring-banner" style="display:none;">
+                    <div class="supervisor-banner-left">
+                        <span class="supervisor-tag">SUPERVISOR MONITORING</span>
+                        <span id="supervisor-banner-text">Read-Only Facility View. Direct operational changes require administrative override.</span>
+                    </div>
+                    <button type="button" class="btn btn-sm btn-warning" onclick="openOverrideModal()">
+                        ⚠️ Administrative Override
+                    </button>
+                </div>
+
+                <!-- ============================================================== -->
+                <!-- SECTION 1: DASHBOARD -->
+                <!-- ============================================================== -->
+                <section id="panel-dashboard" class="main-panel active">
+
+                    <!-- Role Sub-View: National Admin -->
+                    <div id="dashboard-national-view" style="display:none;">
+                        <div class="panel-section-header">
+                            <div>
+                                <h1 class="panel-title">National Healthcare Command Overview</h1>
+                                <p class="panel-subtitle">Aggregated national performance, facility reporting compliance, and resource distribution</p>
+                            </div>
+                            <div class="action-buttons">
+                                <button type="button" class="btn btn-sm btn-outline" onclick="loadNationalDashboard()">🔄 Refresh</button>
+                                <button type="button" class="btn btn-sm btn-primary" onclick="exportNationalReport()">📥 Export CSV</button>
+                            </div>
+                        </div>
+
+                        <!-- 9 National KPI Cards -->
+                        <div class="kpi-grid-9">
+                            <div class="kpi-card">
+                                <div class="kpi-label">TOTAL DISTRICTS</div>
+                                <div class="kpi-value" id="nat-kpi-districts">2</div>
+                                <div class="kpi-subtext">Registered administrative zones</div>
+                            </div>
+                            <div class="kpi-card">
+                                <div class="kpi-label">TOTAL PHCS</div>
+                                <div class="kpi-value" id="nat-kpi-phcs">4</div>
+                                <div class="kpi-subtext">Primary health facilities</div>
+                            </div>
+                            <div class="kpi-card highlight-green">
+                                <div class="kpi-label">REPORTING TODAY</div>
+                                <div class="kpi-value" id="nat-kpi-reporting">4</div>
+                                <div class="kpi-subtext">Synced within 24 hours</div>
+                            </div>
+                            <div class="kpi-card highlight-amber" id="nat-card-stale">
+                                <div class="kpi-label">OUTDATED / STALE</div>
+                                <div class="kpi-value" id="nat-kpi-stale">0</div>
+                                <div class="kpi-subtext">Missing recent reports</div>
+                            </div>
+                            <div class="kpi-card">
+                                <div class="kpi-label">ATTENDANCE COMPLIANCE</div>
+                                <div class="kpi-value" id="nat-kpi-attendance">92%</div>
+                                <div class="kpi-subtext">National roster present</div>
+                            </div>
+                            <div class="kpi-card highlight-red">
+                                <div class="kpi-label">CRITICAL STOCK-OUTS</div>
+                                <div class="kpi-value" id="nat-kpi-shortages">1</div>
+                                <div class="kpi-subtext">Medicines below 20% par</div>
+                            </div>
+                            <div class="kpi-card highlight-amber">
+                                <div class="kpi-label">ACTIVE EMERGENCIES</div>
+                                <div class="kpi-value" id="nat-kpi-emergencies">1</div>
+                                <div class="kpi-subtext">Escalated urgent incidents</div>
+                            </div>
+                            <div class="kpi-card highlight-blue">
+                                <div class="kpi-label">ACTIVE TRANSFERS</div>
+                                <div class="kpi-value" id="nat-kpi-transfers">2</div>
+                                <div class="kpi-subtext">In transit / requested</div>
+                            </div>
+                            <div class="kpi-card">
+                                <div class="kpi-label">AVG REDISTRIBUTION TIME</div>
+                                <div class="kpi-value" id="nat-kpi-response-time">34.5m</div>
+                                <div class="kpi-subtext">Request to completion</div>
+                            </div>
+                        </div>
+
+                        <!-- National AI Insights Card -->
+                        <div class="ai-insights-card" id="nat-ai-insights-card">
+                            <div class="ai-header-flex">
+                                <div class="ai-title-wrap">
+                                    <span style="font-size:1.2rem;">🌐</span>
+                                    <div>
+                                        <h3 style="font-size:1rem; font-weight:700; color:var(--text-primary); margin:0;">National Supply Chain AI Intelligence & Demand Signals</h3>
+                                        <p style="font-size:0.75rem; color:var(--text-muted); margin:0;">Aggregated linear demand trajectories, repetitive shortage flags, and federated model performance</p>
+                                    </div>
+                                </div>
+                                <div style="display:flex; gap:8px; align-items:center;">
+                                    <span class="ai-badge">Federated & Linear Signals</span>
+                                    <button type="button" class="btn btn-sm btn-outline" onclick="openAllInsightsModal()">🔍 View All Insights</button>
+                                </div>
+                            </div>
+                            <div class="ai-grid-3" id="nat-ai-insights-grid">
+                                <!-- Populated dynamically by loadNationalAIInsights() -->
+                            </div>
+                        </div>
+
+                        <!-- District Performance Table -->
+                        <div class="content-card margin-top-md">
+                            <div class="card-header">
+                                <h3 class="card-title">District Performance & Compliance Summary</h3>
+                                <span class="card-tag">Select a district to inspect facilities</span>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="meridian-table" id="nat-district-table">
+                                    <thead>
+                                        <tr>
+                                            <th>District Name</th>
+                                            <th>Total PHCs</th>
+                                            <th>PHCs Online</th>
+                                            <th>Staff Attendance</th>
+                                            <th>Critical Shortages</th>
+                                            <th>Active Transfers</th>
+                                            <th>Avg Response Time</th>
+                                            <th>Status</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="nat-district-tbody">
+                                        <!-- Loaded by loadNationalDashboard() -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
                     </div>
 
-                    <div class="metric-card">
-                        <div class="metric-header">
-                            <span>Patient Footfall (7d Avg)</span>
-                            <span class="metric-icon">👥</span>
+                    <!-- Role Sub-View: District Officer -->
+                    <div id="dashboard-district-view" style="display:none;">
+                        <div class="panel-section-header">
+                            <div>
+                                <h1 class="panel-title" id="dist-dashboard-title">District Coordination Command</h1>
+                                <p class="panel-subtitle">Operational monitoring, facility accountability, and stock surveillance for assigned district</p>
+                            </div>
+                            <div class="action-buttons">
+                                <button type="button" class="btn btn-sm btn-outline" onclick="loadDistrictDashboard()">🔄 Refresh</button>
+                            </div>
                         </div>
-                        <div class="metric-value" id="phc-footfall-value">--</div>
-                        <div class="metric-sub">Daily Average</div>
+
+                        <!-- District KPIs -->
+                        <div class="kpi-grid-9">
+                            <div class="kpi-card">
+                                <div class="kpi-label">DISTRICT PHCS</div>
+                                <div class="kpi-value" id="dist-kpi-phcs">2</div>
+                                <div class="kpi-subtext">Health facilities assigned</div>
+                            </div>
+                            <div class="kpi-card highlight-green">
+                                <div class="kpi-label">ONLINE & SYNCED</div>
+                                <div class="kpi-value" id="dist-kpi-online">2</div>
+                                <div class="kpi-subtext">Active telemetry stream</div>
+                            </div>
+                            <div class="kpi-card">
+                                <div class="kpi-label">STAFF PRESENT TODAY</div>
+                                <div class="kpi-value" id="dist-kpi-staff">6</div>
+                                <div class="kpi-subtext">On duty across district</div>
+                            </div>
+                            <div class="kpi-card">
+                                <div class="kpi-label">ATTENDANCE RATE</div>
+                                <div class="kpi-value" id="dist-kpi-attendance">86%</div>
+                                <div class="kpi-subtext">District daily compliance</div>
+                            </div>
+                            <div class="kpi-card highlight-red">
+                                <div class="kpi-label">CRITICAL SHORTAGES</div>
+                                <div class="kpi-value" id="dist-kpi-shortages">1</div>
+                                <div class="kpi-subtext">Medicines in alert status</div>
+                            </div>
+                            <div class="kpi-card highlight-blue">
+                                <div class="kpi-label">AVAILABLE BEDS</div>
+                                <div class="kpi-value" id="dist-kpi-beds">26</div>
+                                <div class="kpi-subtext">Across all facilities</div>
+                            </div>
+                            <div class="kpi-card highlight-amber">
+                                <div class="kpi-label">PENDING TRANSFERS</div>
+                                <div class="kpi-value" id="dist-kpi-transfers">1</div>
+                                <div class="kpi-subtext">Awaiting your review</div>
+                            </div>
+                            <div class="kpi-card highlight-rose">
+                                <div class="kpi-label">ACTIVE EMERGENCIES</div>
+                                <div class="kpi-value" id="dist-kpi-emergencies">1</div>
+                                <div class="kpi-subtext">Priority incidents</div>
+                            </div>
+                            <div class="kpi-card">
+                                <div class="kpi-label">AVG TRANSFER TIME</div>
+                                <div class="kpi-value" id="dist-kpi-response">25m</div>
+                                <div class="kpi-subtext">District redistribution</div>
+                            </div>
+                        </div>
+
+                        <!-- District AI Insights Card -->
+                        <div class="ai-insights-card" id="dist-ai-insights-card">
+                            <div class="ai-header-flex">
+                                <div class="ai-title-wrap">
+                                    <span style="font-size:1.2rem;">⚡</span>
+                                    <div>
+                                        <h3 style="font-size:1rem; font-weight:700; color:var(--text-primary); margin:0;">District AI Resource Surveillance & Proactive Balancing</h3>
+                                        <p style="font-size:0.75rem; color:var(--text-muted); margin:0;">Early warning shortage predictions and algorithmic donor matching for assigned district</p>
+                                    </div>
+                                </div>
+                                <div style="display:flex; gap:8px; align-items:center;">
+                                    <span class="ai-badge">Rule-Based & Linear Trends</span>
+                                    <span class="ai-badge source" id="dist-ai-reliability-badge">Reliability: High</span>
+                                </div>
+                            </div>
+                            <div id="dist-ai-insights-container">
+                                <!-- Populated dynamically by loadDistrictAIInsights() -->
+                            </div>
+                        </div>
+
+                        <!-- PHC Monitoring Table -->
+                        <div class="content-card margin-top-md">
+                            <div class="card-header">
+                                <h3 class="card-title">Primary Health Centres — Operational Readiness & Compliance</h3>
+                                <span class="card-tag">District Jurisdiction Facilities</span>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="meridian-table" id="dist-phc-table">
+                                    <thead>
+                                        <tr>
+                                            <th>PHC Name</th>
+                                            <th>Last Sync</th>
+                                            <th>Staff Attendance</th>
+                                            <th>Medicine Status</th>
+                                            <th>Bed Occupancy</th>
+                                            <th>Pending Requests</th>
+                                            <th>Alert Level</th>
+                                            <th>Overall Status</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="dist-phc-tbody">
+                                        <!-- Loaded by loadDistrictDashboard() -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Role Sub-View: PHC Staff -->
+                    <div id="dashboard-phc-view" style="display:none;">
+                        <div class="panel-section-header">
+                            <div>
+                                <h1 class="panel-title" id="phc-dashboard-title">PHC Alpha Node — Daily Status</h1>
+                                <p class="panel-subtitle">Facility daily operational overview, today's footfall, and required operational actions</p>
+                            </div>
+                            <div class="action-buttons">
+                                <button type="button" class="btn btn-sm btn-outline" onclick="loadPHCDashboard(currentSelectedPhc)">🔄 Refresh</button>
+                            </div>
+                        </div>
+
+                        <!-- PHC Daily KPIs -->
+                        <div class="kpi-grid-4">
+                            <div class="kpi-card">
+                                <div class="kpi-label">PATIENT FOOTFALL TODAY</div>
+                                <div class="kpi-value" id="phc-kpi-footfall">152</div>
+                                <div class="kpi-subtext">OPD registrations logged</div>
+                            </div>
+                            <div class="kpi-card highlight-blue">
+                                <div class="kpi-label">BEDS AVAILABLE / TOTAL</div>
+                                <div class="kpi-value" id="phc-kpi-beds">4 / 30</div>
+                                <div class="kpi-subtext">26 beds occupied (86.7%)</div>
+                            </div>
+                            <div class="kpi-card">
+                                <div class="kpi-label">STAFF ON DUTY</div>
+                                <div class="kpi-value" id="phc-kpi-staff">6 / 8</div>
+                                <div class="kpi-subtext">1 Absent • 1 Late</div>
+                            </div>
+                            <div class="kpi-card highlight-red">
+                                <div class="kpi-label">LOW-STOCK MEDICINES</div>
+                                <div class="kpi-value" id="phc-kpi-shortages">2</div>
+                                <div class="kpi-subtext">ORS Packets & Paracetamol</div>
+                            </div>
+                        </div>
+
+                        <!-- PHC Staff AI Insights Card -->
+                        <div class="ai-insights-card" id="phc-ai-insights-card">
+                            <div class="ai-header-flex">
+                                <div class="ai-title-wrap">
+                                    <span style="font-size:1.2rem;">🤖</span>
+                                    <div>
+                                        <h3 style="font-size:1rem; font-weight:700; color:var(--text-primary); margin:0;">PHC AI Demand Forecast & Operational Signals</h3>
+                                        <p style="font-size:0.75rem; color:var(--text-muted); margin:0;">Linear Demand Forecast (3–7 days) using facility consumption history</p>
+                                    </div>
+                                </div>
+                                <div style="display:flex; gap:8px; align-items:center;">
+                                    <span class="ai-badge">Linear Demand Forecast</span>
+                                    <span class="ai-badge source" id="phc-ai-source-badge">Local linear model</span>
+                                    <span class="ai-badge" id="phc-ai-reliability-badge">Reliability: High</span>
+                                </div>
+                            </div>
+                            <div id="phc-ai-insights-container">
+                                <!-- Populated dynamically by loadPHCAIInsights() -->
+                            </div>
+                        </div>
+
+                        <!-- Actions Required List Card (Discipline and Accountability) -->
+                        <div class="content-card margin-top-md" style="border-left: 4px solid var(--accent-amber);">
+                            <div class="card-header">
+                                <div style="display:flex; align-items:center; gap:8px;">
+                                    <span style="font-size:1.2rem;">⚡</span>
+                                    <h3 class="card-title" style="color:#B45309;">Immediate Actions Required</h3>
+                                </div>
+                                <span class="badge-status warning">Action Mandatory</span>
+                            </div>
+                            <div id="phc-actions-required-list" class="actions-required-list">
+                                <!-- Populated dynamically by renderPHCActionsRequired() -->
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+
+                <!-- ============================================================== -->
+                <!-- SECTION 2: OPERATIONS -->
+                <!-- ============================================================== -->
+                <section id="panel-operations" class="main-panel" style="display:none;">
+                    <div class="panel-section-header">
+                        <div>
+                            <h1 class="panel-title" id="ops-panel-title">Facility Operations & Daily Data Entry</h1>
+                            <p class="panel-subtitle" id="ops-panel-subtitle">Manage medicine inventory, clinical bed allocation, biometric/RFID staff attendance, and patient flow</p>
+                        </div>
+                        <div class="action-buttons" id="operations-role-actions">
+                            <!-- Injected by role -->
+                        </div>
+                    </div>
+
+                    <!-- PHC STAFF DAILY DATA ENTRY CONTAINER -->
+                    <div id="ops-phc-container">
+                        <!-- Operations Sub-Navigation Tabs -->
+                        <div class="sub-nav-bar">
+                        <button type="button" class="sub-nav-btn active" id="subnav-inventory" onclick="switchOpsSubTab('inventory')">
+                            <span>💊 Medicine Inventory</span>
+                        </button>
+                        <button type="button" class="sub-nav-btn" id="subnav-beds" onclick="switchOpsSubTab('beds')">
+                            <span>🛏️ Beds & Equipment</span>
+                        </button>
+                        <button type="button" class="sub-nav-btn" id="subnav-staff" onclick="switchOpsSubTab('staff')">
+                            <span>🧑‍⚕️ Staff Attendance</span>
+                        </button>
+                        <button type="button" class="sub-nav-btn" id="subnav-footfall" onclick="switchOpsSubTab('footfall')">
+                            <span>📈 Patient Footfall</span>
+                        </button>
+                    </div>
+
+                    <!-- SUB-TAB 1: MEDICINE INVENTORY -->
+                    <div id="opstab-inventory" class="ops-subtab-content active">
+                        <div class="content-card">
+                            <div class="card-header">
+                                <h3 class="card-title">Medicine Stock Reserves & Par Levels</h3>
+                                <div class="card-actions" id="inventory-card-actions">
+                                    <button type="button" class="btn btn-sm btn-outline" onclick="openRecordStockReceivedModal()">📥 Record Stock Received</button>
+                                    <button type="button" class="btn btn-sm btn-outline" onclick="openRecordStockConsumedModal()">📤 Record Stock Dispensed</button>
+                                    <button type="button" class="btn btn-sm btn-primary" onclick="openCreateTransferModal()">⚡ Request Resource</button>
+                                </div>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="meridian-table" id="ops-inventory-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Medicine</th>
+                                            <th>Current Stock</th>
+                                            <th>Safe Par Level</th>
+                                            <th>Stock Ratio</th>
+                                            <th>Linear Demand Forecast (3-Day)</th>
+                                            <th>Status</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="ops-inventory-tbody">
+                                        <!-- Loaded dynamically -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SUB-TAB 2: BEDS & RESOURCES -->
+                    <div id="opstab-beds" class="ops-subtab-content" style="display:none;">
+                        <div class="grid-2-col">
+                            <div class="content-card">
+                                <div class="card-header">
+                                    <h3 class="card-title">Bed Allocation & Occupancy</h3>
+                                    <span class="card-tag">Real-Time Ward Status</span>
+                                </div>
+                                <div style="display:flex; justify-content:space-around; text-align:center; padding:20px 0;">
+                                    <div>
+                                        <div style="font-size:2rem; font-weight:800; color:#0F172A;" id="ops-beds-total">30</div>
+                                        <div style="font-size:0.8rem; color:#64748B;">Total Registered Beds</div>
+                                    </div>
+                                    <div>
+                                        <div style="font-size:2rem; font-weight:800; color:#DC2626;" id="ops-beds-occupied">26</div>
+                                        <div style="font-size:0.8rem; color:#64748B;">Occupied Beds</div>
+                                    </div>
+                                    <div>
+                                        <div style="font-size:2rem; font-weight:800; color:#16A34A;" id="ops-beds-avail">4</div>
+                                        <div style="font-size:0.8rem; color:#64748B;">Available Beds</div>
+                                    </div>
+                                </div>
+                                <div id="ops-bed-form-wrap" style="background:#F8FAFC; padding:16px; border-radius:8px; border:1px solid #E2E8F0;">
+                                    <h4 style="font-size:0.9rem; font-weight:700; margin-bottom:8px;">Update Bed Status</h4>
+                                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-bottom:10px;">
+                                        <div>
+                                            <label for="ops-beds-total-input" style="font-size:0.75rem; font-weight:600; display:block; margin-bottom:4px;">Total Registered Beds: *</label>
+                                            <input type="number" id="ops-beds-total-input" class="login-input" min="0" value="30" oninput="calculateLiveAvailableBeds()">
+                                        </div>
+                                        <div>
+                                            <label for="quick-occupied-input" style="font-size:0.75rem; font-weight:600; display:block; margin-bottom:4px;">Occupied Beds: *</label>
+                                            <input type="number" id="quick-occupied-input" class="login-input" min="0" value="26" oninput="calculateLiveAvailableBeds()">
+                                        </div>
+                                    </div>
+                                    <div id="bed-validation-error" class="form-hint error" style="display:none; margin-bottom:8px;">Occupied beds cannot exceed total registered beds.</div>
+                                    <div style="margin-bottom:12px;">
+                                        <label for="ops-beds-notes-input" style="font-size:0.75rem; font-weight:600; display:block; margin-bottom:4px;">Ward Notes / Reason:</label>
+                                        <input type="text" id="ops-beds-notes-input" class="login-input" placeholder="e.g. Seasonal ward expansion, triage intake">
+                                    </div>
+                                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                                        <span style="font-size:0.8rem; color:#64748B;">Calculated Available: <strong id="ops-beds-calc-avail" style="color:#16A34A;">4</strong> beds</span>
+                                        <button type="button" id="btn-update-beds" class="btn btn-primary" onclick="submitQuickBedUpdate()">Update Bed Status</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="content-card">
+                                <div class="card-header">
+                                    <h3 class="card-title">Critical Facility Equipment</h3>
+                                    <span class="card-tag">Readiness Verification</span>
+                                </div>
+                                <div id="ops-equipment-list" class="equipment-checklist">
+                                    <!-- Populated dynamically from GET /api/equipment -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SUB-TAB 3: STAFF ATTENDANCE -->
+                    <div id="opstab-staff" class="ops-subtab-content" style="display:none;">
+                        <div class="grid-2-col">
+                            <!-- Biometric RFID Punch Simulator -->
+                            <div class="content-card">
+                                <div class="card-header">
+                                    <h3 class="card-title">Smart Card / RFID Reader Terminal</h3>
+                                    <span class="badge-status normal">Online</span>
+                                </div>
+                                <p style="font-size:0.85rem; color:#64748B; margin-bottom:12px;">Simulate physical card scan for contact-less biometric verification:</p>
+                                
+                                <div style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px;">
+                                    <button type="button" class="btn btn-sm btn-outline" onclick="simulateCardPunch('RFID-10101', 'STF-101')">💳 Anita Sharma (ICU)</button>
+                                    <button type="button" class="btn btn-sm btn-outline" onclick="simulateCardPunch('RFID-10102', 'STF-102')">💳 Sunita Devi (ER)</button>
+                                    <button type="button" class="btn btn-sm btn-outline" onclick="simulateCardPunch('RFID-10103', 'STF-103')">💳 Dr. Rajesh Kumar</button>
+                                    <button type="button" class="btn btn-sm btn-outline" onclick="simulateCardPunch('RFID-10107', 'STF-107')">💳 Ramesh Yadav (Amb)</button>
+                                </div>
+
+                                <div id="card-punch-feedback" style="display:none; padding:10px; border-radius:6px; font-size:0.85rem;"></div>
+
+                                <div class="margin-top-sm" style="background:#F8FAFC; padding:12px; border-radius:6px; border:1px solid #E2E8F0;">
+                                    <h4 style="font-size:0.85rem; font-weight:700; margin-bottom:6px;">Manual Attendance Entry</h4>
+                                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                                        <select id="manual-staff-select" class="login-input" style="flex:1; min-width:180px;">
+                                            <!-- Populated dynamically from staff members -->
+                                            <option value="STF-105">Priya Verma (Lab Tech)</option>
+                                            <option value="STF-106">Nurse Pooja Mehra (OPD)</option>
+                                            <option value="STF-108">Dr. Alok Verma (Pediatrics)</option>
+                                        </select>
+                                        <select id="manual-status-select" class="login-input" style="width:140px;">
+                                            <option value="CHECKED_IN">Checked In</option>
+                                            <option value="ON_LEAVE">On Leave</option>
+                                            <option value="ABSENT">Absent</option>
+                                        </select>
+                                        <button type="button" id="btn-manual-attendance" class="btn btn-primary" onclick="submitManualAttendance()">Log Attendance</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Today's Attendance Roster -->
+                            <div class="content-card">
+                                <div class="card-header">
+                                    <h3 class="card-title">Today's Duty Roster</h3>
+                                    <span class="card-tag" id="ops-attendance-summary-tag">Present: -- • Absent: -- • Late: --</span>
+                                </div>
+                                <div class="table-responsive" style="max-height:360px;">
+                                    <table class="meridian-table" id="ops-attendance-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Staff Member</th>
+                                                <th>Role</th>
+                                                <th>Punch In</th>
+                                                <th>Status</th>
+                                                <th>Method</th>
+                                                <th>Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="ops-attendance-tbody">
+                                            <!-- Loaded dynamically -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SUB-TAB 4: PATIENT FOOTFALL -->
+                    <div id="opstab-footfall" class="ops-subtab-content" style="display:none;">
+                        <div class="grid-2-col">
+                            <div class="content-card">
+                                <div class="card-header">
+                                    <h3 class="card-title">Daily OPD Footfall Entry</h3>
+                                    <span class="card-tag" id="footfall-mode-tag">Active Log</span>
+                                </div>
+                                <div style="background:#F8FAFC; padding:16px; border-radius:8px; border:1px solid #E2E8F0; margin-bottom:16px;">
+                                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px; margin-bottom:10px;">
+                                        <div>
+                                            <label for="footfall-date-input" style="font-size:0.75rem; font-weight:700; display:block; margin-bottom:4px;">Visit Date: *</label>
+                                            <input type="date" id="footfall-date-input" class="login-input" onchange="handleFootfallDateChange(this.value)">
+                                        </div>
+                                        <div>
+                                            <label for="daily-footfall-input" style="font-size:0.75rem; font-weight:700; display:block; margin-bottom:4px;">Total Patient Visits: *</label>
+                                            <input type="number" id="daily-footfall-input" class="login-input" value="150" min="0" oninput="validateFootfallBreakdown()">
+                                        </div>
+                                    </div>
+
+                                    <div style="font-size:0.75rem; font-weight:700; color:#475569; margin-bottom:6px;">Demographic Category Breakdown:</div>
+                                    <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:8px; margin-bottom:10px;">
+                                        <div>
+                                            <label for="footfall-male-input" style="font-size:0.7rem; color:#64748B;">Male:</label>
+                                            <input type="number" id="footfall-male-input" class="login-input" min="0" value="70" oninput="validateFootfallBreakdown()">
+                                        </div>
+                                        <div>
+                                            <label for="footfall-female-input" style="font-size:0.7rem; color:#64748B;">Female:</label>
+                                            <input type="number" id="footfall-female-input" class="login-input" min="0" value="70" oninput="validateFootfallBreakdown()">
+                                        </div>
+                                        <div>
+                                            <label for="footfall-other-input" style="font-size:0.7rem; color:#64748B;">Other / Child:</label>
+                                            <input type="number" id="footfall-other-input" class="login-input" min="0" value="10" oninput="validateFootfallBreakdown()">
+                                        </div>
+                                    </div>
+
+                                    <div style="margin-bottom:10px;">
+                                        <label for="footfall-emergency-input" style="font-size:0.7rem; color:#64748B;">Emergency / Triage Cases:</label>
+                                        <input type="number" id="footfall-emergency-input" class="login-input" min="0" value="5">
+                                    </div>
+
+                                    <div id="footfall-validation-error" class="form-hint error" style="display:none; margin-bottom:8px;">Category sum cannot exceed total patient count.</div>
+
+                                    <div id="footfall-correction-wrap" style="margin-bottom:12px; display:none;">
+                                        <label for="footfall-correction-input" style="font-size:0.75rem; font-weight:700; color:#B45309; display:block; margin-bottom:4px;">Correction Reason (Mandatory for existing records): *</label>
+                                        <input type="text" id="footfall-correction-input" class="login-input" placeholder="e.g. Evening triage tally reconciliation">
+                                    </div>
+
+                                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                                        <div style="display:flex; gap:6px;">
+                                            <button type="button" class="btn btn-xs btn-outline" onclick="adjustFootfall(1)">+1</button>
+                                            <button type="button" class="btn btn-xs btn-outline" onclick="adjustFootfall(5)">+5</button>
+                                            <button type="button" class="btn btn-xs btn-outline" onclick="adjustFootfall(10)">+10</button>
+                                        </div>
+                                        <button type="button" id="btn-submit-footfall" class="btn btn-primary" onclick="submitFootfallEntry()">Save Daily Count</button>
+                                    </div>
+                                </div>
+                                <p style="font-size:0.8rem; color:#64748B;">Footfall records are fed into Meridian's linear regression demand forecaster to anticipate drug stock-outs 72 hours ahead of time.</p>
+                            </div>
+
+                            <div class="content-card">
+                                <div class="card-header">
+                                    <h3 class="card-title">7-Day Patient Volume Trend</h3>
+                                    <span class="card-tag">Epidemic Surveillance</span>
+                                </div>
+                                <div style="height:200px; position:relative; margin-bottom:16px;">
+                                    <canvas id="ops-footfall-chart"></canvas>
+                                </div>
+
+                                <h4 style="font-size:0.85rem; font-weight:700; margin-bottom:8px; color:#334155;">Recent Footfall History</h4>
+                                <div class="table-responsive" style="max-height:180px;">
+                                    <table class="meridian-table" id="ops-footfall-history-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Date</th>
+                                                <th>Total</th>
+                                                <th>Breakdown (M/F/O)</th>
+                                                <th>Emergency</th>
+                                                <th>Action</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="ops-footfall-history-tbody">
+                                            <!-- Populated dynamically -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div> <!-- closes opstab-footfall -->
+                </div> <!-- closes ops-phc-container -->
+
+                <!-- DISTRICT OFFICER READ-ONLY PHC MONITORING -->
+                <div id="ops-district-container" style="display:none;">
+                    <!-- Four compact summary cards for District Officer -->
+                    <div class="kpi-grid-4 margin-bottom-md">
+                        <div class="kpi-card highlight-blue">
+                            <div class="kpi-label">TOTAL PHCS</div>
+                            <div class="kpi-value" id="dist-kpi-total-phcs">--</div>
+                            <div class="kpi-subtext">Assigned district facilities</div>
+                        </div>
+                        <div class="kpi-card highlight-green">
+                            <div class="kpi-label">REPORTING TODAY</div>
+                            <div class="kpi-value" id="dist-kpi-reporting-today">--</div>
+                            <div class="kpi-subtext">Active telemetry online</div>
+                        </div>
+                        <div class="kpi-card highlight-amber">
+                            <div class="kpi-label">PHCS REQUIRING ATTENTION</div>
+                            <div class="kpi-value" id="dist-kpi-requiring-attention">--</div>
+                            <div class="kpi-subtext">Shortages or operational alerts</div>
+                        </div>
+                        <div class="kpi-card highlight-red">
+                            <div class="kpi-label">PENDING RESOURCE REQUESTS</div>
+                            <div class="kpi-value" id="dist-kpi-pending-requests">--</div>
+                            <div class="kpi-subtext">Awaiting redistribution review</div>
+                        </div>
+                    </div>
+
+                    <div class="content-card">
+                        <div class="card-header">
+                            <div>
+                                <h3 class="card-title">Primary Health Centre Operational Surveillance</h3>
+                                <span class="card-tag">Assigned District Facility Roster (Read-Only)</span>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline" onclick="loadDistrictOperationsMonitoring()">🔄 Refresh Monitoring</button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="meridian-table" id="dist-ops-monitoring-table">
+                                <thead>
+                                    <tr>
+                                        <th>PHC Name</th>
+                                        <th>Last Data Update</th>
+                                        <th>Reporting Status</th>
+                                        <th>Medicine-Stock Status</th>
+                                        <th>Available / Occupied Beds</th>
+                                        <th>Staff Attendance</th>
+                                        <th>Patient Footfall Today</th>
+                                        <th>Active Alerts</th>
+                                        <th>Pending Transfers</th>
+                                        <th>Overall Status</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="dist-ops-monitoring-tbody">
+                                    <!-- Loaded by loadDistrictOperationsMonitoring() -->
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Main Grid: Stock Form & Live Inventory Table -->
-                <div class="content-grid-2col">
-                    <!-- Left: Stock Update & Voice Form -->
-                    <div class="card shadow-sm">
-                        <div class="card-header">
-                            <h3>Update Inventory & Voice Entry</h3>
-                            <button class="voice-btn" id="voice-entry-btn" onclick="toggleVoiceInput()">
-                                <span class="voice-icon">🎙️</span> Speak Update (Web Speech API)
-                            </button>
+                <!-- NATIONAL ADMIN READ-ONLY DISTRICT & PHC MONITORING -->
+                <div id="ops-national-container" style="display:none;">
+                    <!-- Four compact summary cards for National Admin -->
+                    <div class="kpi-grid-4 margin-bottom-md">
+                        <div class="kpi-card highlight-blue">
+                            <div class="kpi-label">TOTAL DISTRICTS</div>
+                            <div class="kpi-value" id="nat-kpi-total-districts">--</div>
+                            <div class="kpi-subtext">Active operational districts</div>
                         </div>
-                        <div class="voice-status-box" id="voice-status-box">
-                            Click 'Speak Update' and say e.g., <em>"Update ORS Packets quantity 150"</em>
+                        <div class="kpi-card highlight-green">
+                            <div class="kpi-label">TOTAL PHCS</div>
+                            <div class="kpi-value" id="nat-kpi-total-phcs">--</div>
+                            <div class="kpi-subtext">Nationwide primary health centres</div>
+                        </div>
+                        <div class="kpi-card highlight-amber">
+                            <div class="kpi-label">PHCS REPORTING TODAY</div>
+                            <div class="kpi-value" id="nat-kpi-reporting-today">--</div>
+                            <div class="kpi-subtext">Online telemetry compliance</div>
+                        </div>
+                        <div class="kpi-card highlight-red">
+                            <div class="kpi-label">CRITICAL OPERATIONAL ISSUES</div>
+                            <div class="kpi-value" id="nat-kpi-critical-issues">--</div>
+                            <div class="kpi-subtext">Deficits, escalations & stale feeds</div>
+                        </div>
+                    </div>
+
+                    <!-- National District Summary Table View -->
+                    <div id="nat-district-summary-view" class="content-card">
+                        <div class="card-header">
+                            <div>
+                                <h3 class="card-title">Nationwide District & Facility Monitoring Summary</h3>
+                                <span class="card-tag">Consolidated Cross-District Overview (Read-Only)</span>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline" onclick="loadNationalOperationsMonitoring()">🔄 Refresh All</button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="meridian-table" id="nat-ops-monitoring-table">
+                                <thead>
+                                    <tr>
+                                        <th>District Name</th>
+                                        <th>Total PHCs</th>
+                                        <th>PHCs Reporting</th>
+                                        <th>Stale or Missing PHCs</th>
+                                        <th>Medicine Shortages</th>
+                                        <th>Bed Availability</th>
+                                        <th>Attendance Compliance</th>
+                                        <th>Active Transfers</th>
+                                        <th>Average Response Time</th>
+                                        <th>Overall Status</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="nat-ops-monitoring-tbody">
+                                    <!-- Loaded by loadNationalOperationsMonitoring() -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- National -> District Drilldown Section (Initially Hidden) -->
+                    <div id="nat-district-drilldown-container" style="display:none;" class="margin-top-md">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                            <button type="button" class="btn btn-sm btn-outline" onclick="closeNationalDistrictDrilldown()">
+                                ← Back to All Districts
+                            </button>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span style="font-size:0.85rem; color:#64748B;">Drilldown District:</span>
+                                <span class="badge-status info" id="nat-drilldown-district-name">District Name</span>
+                            </div>
                         </div>
 
-                        <form id="stock-update-form" onsubmit="handleStockUpdateSubmit(event)" class="form-layout">
-                            <div class="form-group">
-                                <label for="form-phc-id">PHC Node ID</label>
-                                <input type="text" id="form-phc-id" value="PHC-001" readonly class="input-readonly">
+                        <!-- 4 Compact Drilldown Summary Cards -->
+                        <div class="kpi-grid-4 margin-bottom-md">
+                            <div class="kpi-card highlight-blue">
+                                <div class="kpi-label">TOTAL PHCS</div>
+                                <div class="kpi-value" id="nat-drilldown-total-phcs">--</div>
+                                <div class="kpi-subtext">Facilities in district</div>
                             </div>
-                            <div class="form-group">
-                                <label for="form-medicine-name">Medicine Name</label>
-                                <select id="form-medicine-name" required>
-                                    <option value="ORS Packets">ORS Packets</option>
-                                    <option value="Paracetamol 500mg">Paracetamol 500mg</option>
-                                    <option value="Amoxicillin 250mg">Amoxicillin 250mg</option>
-                                    <option value="Insulin Vials">Insulin Vials</option>
-                                    <option value="Zinc Supplements">Zinc Supplements</option>
+                            <div class="kpi-card highlight-green">
+                                <div class="kpi-label">REPORTING TODAY</div>
+                                <div class="kpi-value" id="nat-drilldown-reporting-today">--</div>
+                                <div class="kpi-subtext">Active telemetry online</div>
+                            </div>
+                            <div class="kpi-card highlight-amber">
+                                <div class="kpi-label">PHCS REQUIRING ATTENTION</div>
+                                <div class="kpi-value" id="nat-drilldown-requiring-attention">--</div>
+                                <div class="kpi-subtext">Shortages or alerts</div>
+                            </div>
+                            <div class="kpi-card highlight-red">
+                                <div class="kpi-label">PENDING RESOURCE REQUESTS</div>
+                                <div class="kpi-value" id="nat-drilldown-pending-requests">--</div>
+                                <div class="kpi-subtext">Active transfer needs</div>
+                            </div>
+                        </div>
+
+                        <div class="content-card">
+                            <div class="card-header">
+                                <div>
+                                    <h3 class="card-title" id="nat-drilldown-card-title">District Primary Health Centres</h3>
+                                    <span class="card-tag">Assigned District Facility Roster (Read-Only)</span>
+                                </div>
+                                <button type="button" class="btn btn-sm btn-outline" onclick="refreshNationalDistrictDrilldown()">🔄 Refresh District PHCs</button>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="meridian-table" id="nat-drilldown-table">
+                                    <thead>
+                                        <tr>
+                                            <th>PHC Name</th>
+                                            <th>Last Data Update</th>
+                                            <th>Reporting Status</th>
+                                            <th>Medicine-Stock Status</th>
+                                            <th>Available / Occupied Beds</th>
+                                            <th>Staff Attendance</th>
+                                            <th>Patient Footfall Today</th>
+                                            <th>Active Alerts</th>
+                                            <th>Pending Transfers</th>
+                                            <th>Overall Status</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="nat-drilldown-tbody">
+                                        <!-- Loaded dynamically -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                </section>
+
+
+                <!-- ============================================================== -->
+                <!-- SECTION 3: ALERTS & TRANSFERS -->
+                <!-- ============================================================== -->
+                <section id="panel-transfers" class="main-panel" style="display:none;">
+                    <div class="panel-section-header">
+                        <div>
+                            <h1 class="panel-title">Shortage Alerts & Resource Redistribution</h1>
+                            <p class="panel-subtitle">10-step audited redistribution workflow: request, officer review, dispatch, and delivery reconciliation</p>
+                        </div>
+                        <div class="action-buttons">
+                            <button type="button" class="btn btn-sm btn-outline" onclick="loadTransfersWorkspace()">🔄 Refresh Workspace</button>
+                            <button type="button" class="btn btn-sm btn-primary" id="btn-create-transfer-trigger" onclick="openCreateTransferModal()">⚡ Request Resource</button>
+                        </div>
+                    </div>
+
+                    <!-- Transfer Overview Pills -->
+                    <div class="kpi-grid-4 margin-bottom-md">
+                        <div class="kpi-card highlight-red">
+                            <div class="kpi-label">CRITICAL SHORTAGES</div>
+                            <div class="kpi-value" id="transfers-kpi-shortages">1</div>
+                            <div class="kpi-subtext">Immediate action needed</div>
+                        </div>
+                        <div class="kpi-card highlight-amber">
+                            <div class="kpi-label">PENDING REVIEW</div>
+                            <div class="kpi-value" id="transfers-kpi-pending">1</div>
+                            <div class="kpi-subtext">Awaiting officer decision</div>
+                        </div>
+                        <div class="kpi-card highlight-blue">
+                            <div class="kpi-label">IN TRANSIT</div>
+                            <div class="kpi-value" id="transfers-kpi-transit">1</div>
+                            <div class="kpi-subtext">Consignment on route</div>
+                        </div>
+                        <div class="kpi-card highlight-green">
+                            <div class="kpi-label">COMPLETED TRANSFERS</div>
+                            <div class="kpi-value" id="transfers-kpi-completed">1</div>
+                            <div class="kpi-subtext">Dual-inventory reconciled</div>
+                        </div>
+                    </div>
+
+                    <!-- Active Transfers Ledger Card -->
+                    <div class="content-card">
+                        <div class="card-header">
+                            <h3 class="card-title">Redistribution Transfer Ledger & Tracking</h3>
+                            <div style="display:flex; gap:8px;">
+                                <select id="transfer-filter-status" class="login-input" style="padding:4px 8px; font-size:0.75rem;" onchange="filterTransfersTable(this.value)">
+                                    <option value="ALL">All Statuses</option>
+                                    <option value="Requested">Requested (Pending)</option>
+                                    <option value="Approved">Approved</option>
+                                    <option value="In Transit">In Transit</option>
+                                    <option value="Completed">Completed</option>
                                 </select>
                             </div>
-                            <div class="form-group">
-                                <label for="form-quantity">New Stock Quantity</label>
-                                <input type="number" id="form-quantity" required placeholder="e.g. 150" min="0">
-                            </div>
-                            <div class="form-group">
-                                <label for="form-par-level">Par Level Baseline</label>
-                                <input type="number" id="form-par-level" value="100" min="10">
-                            </div>
-                            <button type="submit" class="btn btn-primary btn-block">
-                                💾 Update Database & Refresh Dashboard
-                            </button>
-                        </form>
-                    </div>
-
-                    <!-- Right: Live Inventory Table -->
-                    <div class="card shadow-sm">
-                        <div class="card-header">
-                            <h3>Live PHC Medicine Inventory</h3>
-                            <span class="badge badge-info">Reflects DB Immediately</span>
                         </div>
                         <div class="table-responsive">
-                            <table class="table" id="phc-inventory-table">
+                            <table class="meridian-table" id="transfers-table">
                                 <thead>
                                     <tr>
-                                        <th>Medicine Name</th>
-                                        <th>Current Stock</th>
-                                        <th>Par Level</th>
-                                        <th>Status</th>
-                                        <th>Forecast Demand</th>
-                                        <th>Days Cover</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <!-- Populated dynamically -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Footfall & Bed Charts -->
-                <div class="content-grid-2col margin-top-lg">
-                    <div class="card shadow-sm">
-                        <div class="card-header">
-                            <h3>Patient Footfall Trend (Last 7 Days)</h3>
-                        </div>
-                        <div class="chart-container">
-                            <canvas id="footfallChart"></canvas>
-                        </div>
-                    </div>
-
-                    <div class="card shadow-sm">
-                        <div class="card-header">
-                            <h3>Encrypted Staff Attendance Log</h3>
-                            <span class="badge badge-secondary">Fernet Ciphertext</span>
-                        </div>
-                        <div class="table-responsive">
-                            <table class="table table-sm" id="staff-table">
-                                <thead>
-                                    <tr>
-                                        <th>Staff Token (SHA-256)</th>
-                                        <th>Fernet Encrypted Ciphertext</th>
-                                        <th>Status</th>
-                                        <th>Date</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <!-- Populated dynamically -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- 2. DISTRICT COMMAND DASHBOARD -->
-            <section id="district-dashboard" class="tab-content">
-                <div class="section-header">
-                    <h2>District Aggregation Command Center</h2>
-                    <span class="badge badge-primary">District-North Rollup</span>
-                </div>
-
-                <div class="alert-banner alert-warning" id="district-warning-banner">
-                    <div class="banner-icon">⚠️</div>
-                    <div>
-                        <strong>PAR LEVEL ALERT:</strong> <span id="warning-count-text">Scanning district inventory...</span>
-                    </div>
-                </div>
-
-                <div class="content-grid-2col margin-top-lg">
-                    <div class="card shadow-sm">
-                        <div class="card-header">
-                            <h3>Medicine Par-Level Flags (< 30% Par Threshold)</h3>
-                        </div>
-                        <div class="table-responsive">
-                            <table class="table" id="district-warnings-table">
-                                <thead>
-                                    <tr>
-                                        <th>PHC Node</th>
+                                        <th>Transfer ID</th>
+                                        <th>Requester (Target)</th>
+                                        <th>Donor (Source)</th>
                                         <th>Medicine</th>
-                                        <th>Current Stock</th>
-                                        <th>Par Baseline</th>
-                                        <th>% of Par</th>
-                                        <th>Alert Status</th>
+                                        <th>Quantity</th>
+                                        <th>ETA / Elapsed</th>
+                                        <th>Urgency</th>
+                                        <th>Status</th>
+                                        <th>Decision / Escalation</th>
+                                        <th>Actions</th>
                                     </tr>
                                 </thead>
-                                <tbody>
-                                    <!-- Populated dynamically -->
+                                <tbody id="transfers-tbody">
+                                    <!-- Loaded dynamically by loadTransfersWorkspace() -->
                                 </tbody>
                             </table>
                         </div>
                     </div>
+                </section>
 
-                    <div class="card shadow-sm">
-                        <div class="card-header">
-                            <h3>District Aggregate Totals & Privacy Noise</h3>
+
+                <!-- ============================================================== -->
+                <!-- SECTION 4: COMMUNICATION & REPORTS -->
+                <!-- ============================================================== -->
+                <section id="panel-communication" class="main-panel" style="display:none;">
+                    <div class="panel-section-header">
+                        <div>
+                            <h1 class="panel-title">Official Communication, Accountability & Reports</h1>
+                            <p class="panel-subtitle">Official directives, timestamped acknowledgements, discipline compliance, and analytical exports</p>
                         </div>
-                        <div id="district-summary-metrics" class="dp-box">
-                            <!-- Populated dynamically -->
+                        <div class="action-buttons">
+                            <button type="button" class="btn btn-sm btn-outline" onclick="loadCommunicationDesk()">🔄 Refresh</button>
+                            <button type="button" class="btn btn-sm btn-primary" onclick="openComposeMessageModal()">✍️ Compose Directive</button>
                         </div>
                     </div>
-                </div>
-            </section>
 
-            <!-- 3. REDISTRIBUTION ENGINE (HUMAN-IN-THE-LOOP) -->
-            <section id="redistribution-panel" class="tab-content">
-                <div class="section-header">
-                    <h2>Explainable Resource Redistribution Engine</h2>
-                    <span class="badge badge-success">Human-in-the-Loop Mode</span>
+                    <!-- Sub-Navigation: Communication & Reports Secondary Tabs -->
+                    <div class="sub-nav-bar" id="comm-sub-nav-bar">
+                        <button type="button" class="sub-nav-btn active" id="subnav-messages" onclick="switchCommSubTab('messages')">
+                            <span>📬 Directives & Notices</span>
+                        </button>
+                        <button type="button" class="sub-nav-btn" id="subnav-reports" onclick="switchCommSubTab('reports')">
+                            <span id="subnav-reports-label">📊 Reports</span>
+                        </button>
+                        <button type="button" class="sub-nav-btn" id="subnav-aimodel" onclick="switchCommSubTab('aimodel')" style="display:none;">
+                            <span>🧠 AI Model & Privacy</span>
+                        </button>
+                        <button type="button" class="sub-nav-btn" id="subnav-security" onclick="switchCommSubTab('security')" style="display:none;">
+                            <span>🛡️ Security & System Admin</span>
+                        </button>
+                        <button type="button" class="sub-nav-btn" id="subnav-integrations" onclick="switchCommSubTab('integrations')" style="display:none;">
+                            <span>🔌 Integrations</span>
+                        </button>
+                        <button type="button" class="sub-nav-btn" id="subnav-audit" onclick="switchCommSubTab('audit')" style="display:none;">
+                            <span>📜 Audit Logs</span>
+                        </button>
+                        <button type="button" class="sub-nav-btn" id="subnav-acknowledgements" onclick="switchCommSubTab('acknowledgements')" style="display:none;">
+                            <span>✍️ Replies & Acknowledgements</span>
+                        </button>
+                        <button type="button" class="sub-nav-btn" id="subnav-activity" onclick="switchCommSubTab('activity')" style="display:none;">
+                            <span>📈 PHC Activity</span>
+                        </button>
+                    </div>
+
+                    <!-- SUB-TAB 1: OFFICIAL MESSAGES & DIRECTIVES -->
+                    <div id="commtab-messages" class="comm-subtab-content active">
+                        <div class="content-card">
+                            <div class="card-header">
+                                <h3 class="card-title">Official Communication Desk & Acknowledgement Ledger</h3>
+                                <span class="card-tag">Audited & Timestamped Transmission</span>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="meridian-table" id="messages-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Time Sent</th>
+                                            <th>Sender</th>
+                                            <th>Recipient</th>
+                                            <th>Subject & Message</th>
+                                            <th>Priority</th>
+                                            <th>Acknowledgement Status</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="messages-tbody">
+                                        <!-- Loaded dynamically -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SUB-TAB 2: ANALYTICAL REPORTS -->
+                    <div id="commtab-reports" class="comm-subtab-content" style="display:none;">
+                        <div class="grid-2-col">
+                            <!-- Turnaround Time Card -->
+                            <div class="content-card">
+                                <div class="card-header">
+                                    <h3 class="card-title">Redistribution Response-Time Report</h3>
+                                    <span class="card-tag">End-to-End Metrics</span>
+                                </div>
+                                <div style="display:flex; justify-content:space-around; text-align:center; padding:16px 0;">
+                                    <div>
+                                        <div style="font-size:1.8rem; font-weight:800; color:var(--accent-teal);" id="report-avg-eta">25.0m</div>
+                                        <div style="font-size:0.75rem; color:#64748B;">Average Transit ETA</div>
+                                    </div>
+                                    <div>
+                                        <div style="font-size:1.8rem; font-weight:800; color:var(--accent-teal);" id="report-avg-turnaround">34.5m</div>
+                                        <div style="font-size:0.75rem; color:#64748B;">Avg Total Turnaround</div>
+                                    </div>
+                                    <div>
+                                        <div style="font-size:1.8rem; font-weight:800; color:#16A34A;" id="report-completed-transfers">1</div>
+                                        <div style="font-size:0.75rem; color:#64748B;">Reconciled Consignments</div>
+                                    </div>
+                                </div>
+                                <p style="font-size:0.8rem; color:#64748B;">Turnaround measured from PHC shortage trigger through District Officer review, donor packaging, and recipient verification.</p>
+                            </div>
+
+                            <!-- Attendance Compliance Card -->
+                            <div class="content-card">
+                                <div class="card-header">
+                                    <h3 class="card-title">Staff Attendance Compliance</h3>
+                                    <span class="card-tag">Punctuality Verification</span>
+                                </div>
+                                <div class="table-responsive">
+                                    <table class="meridian-table" id="report-attendance-table">
+                                        <thead>
+                                            <tr>
+                                                <th>District</th>
+                                                <th>Attendance Rate</th>
+                                                <th>On-Time Arrivals</th>
+                                                <th>Late Arrivals</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="report-attendance-tbody">
+                                            <!-- Populated dynamically -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Export Options Card -->
+                        <div class="content-card margin-top-md">
+                            <div class="card-header">
+                                <h3 class="card-title">Operational Data Export Center</h3>
+                                <span class="card-tag">Official Audit Records</span>
+                            </div>
+                            <div style="display:flex; gap:12px; align-items:center;">
+                                <p style="font-size:0.85rem; color:#475569; flex:1;">Download complete district compliance, inventory par balances, and audit records in standardized CSV format for external review:</p>
+                                <button type="button" class="btn btn-outline" onclick="exportReport('district_summary')">📥 Export District Summary (CSV)</button>
+                                <button type="button" class="btn btn-outline" onclick="exportReport('inventory_audit')">📥 Export Inventory Ledger (CSV)</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SUB-TAB 3: AI MODEL & PRIVACY (NATIONAL ADMIN ONLY) -->
+                    <div id="commtab-aimodel" class="comm-subtab-content" style="display:none;">
+                        <div class="content-card">
+                            <div class="card-header">
+                                <div>
+                                    <h3 class="card-title">Federated Learning & Demand Forecasting Model Command</h3>
+                                    <span class="card-tag">National Decentralized Aggregator</span>
+                                </div>
+                                <div style="display:flex; gap:8px;">
+                                    <button type="button" class="btn btn-primary" onclick="openFederatedConfirmModal()">⚡ Run Federated Model Update</button>
+                                    <button type="button" class="btn btn-outline" onclick="runModelEvaluation()">🔬 Evaluate Forecast Model</button>
+                                </div>
+                            </div>
+
+                            <!-- Federated Model Summary Grid -->
+                            <div class="kpi-grid-4 margin-bottom-md">
+                                <div class="kpi-card">
+                                    <div class="kpi-label">ACTIVE MODEL VERSION</div>
+                                    <div class="kpi-value" id="fed-model-ver" style="font-size:1.4rem;">v2.4-FedAvg</div>
+                                    <div class="kpi-subtext" id="fed-model-status">APPROVED_ACTIVE</div>
+                                </div>
+                                <div class="kpi-card highlight-green">
+                                    <div class="kpi-label">PARTICIPATING PHCS</div>
+                                    <div class="kpi-value" id="fed-participating-count">3</div>
+                                    <div class="kpi-subtext">PHC 1, 2, & 3 Contributing</div>
+                                </div>
+                                <div class="kpi-card highlight-blue">
+                                    <div class="kpi-label">EVALUATION ACCURACY</div>
+                                    <div class="kpi-value" id="fed-eval-accuracy">91.8%</div>
+                                    <div class="kpi-subtext">MAE = 2.14 units • RMSE = 2.68</div>
+                                </div>
+                                <div class="kpi-card">
+                                    <div class="kpi-label">RAW RECORDS SHARED</div>
+                                    <div class="kpi-value" style="color:var(--accent-emerald);">NO (0)</div>
+                                    <div class="kpi-subtext">Weights only transmitted</div>
+                                </div>
+                            </div>
+
+                            <!-- Model Summary Details -->
+                            <div style="background:#F8FAFC; border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:16px; margin-bottom:14px;">
+                                <div style="font-size:0.85rem; font-weight:700; color:var(--text-primary); margin-bottom:6px;">Decentralized Privacy Architecture</div>
+                                <p style="font-size:0.8rem; color:var(--text-secondary); line-height:1.5; margin:0;" id="fed-privacy-explanation">
+                                    Participating PHCs train local forecasting models using their own operational data. Raw PHC records remain within their authorised scope. Only permitted model updates are sent for aggregation into a shared forecasting model.
+                                </p>
+                            </div>
+
+                            <!-- Evaluation Backtest Result Container -->
+                            <div id="fed-evaluation-result-box" style="display:none; background:#F0FDF4; border:1px solid #BBF7D0; border-radius:var(--radius-sm); padding:16px; margin-bottom:14px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                                    <span style="font-weight:700; color:#166534; font-size:0.9rem;">Model Backtest Evaluation Complete</span>
+                                    <span class="ai-badge" id="eval-status-badge" style="background:#DCFCE7; color:#166534;">IMPROVED</span>
+                                </div>
+                                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:10px; margin-top:8px;">
+                                    <div><span style="font-size:0.75rem; color:#475569;">Window:</span> <strong id="eval-window-text">30 Days</strong></div>
+                                    <div><span style="font-size:0.75rem; color:#475569;">MAE:</span> <strong id="eval-mae-text">2.14 units</strong></div>
+                                    <div><span style="font-size:0.75rem; color:#475569;">RMSE:</span> <strong id="eval-rmse-text">2.68 units</strong></div>
+                                    <div><span style="font-size:0.75rem; color:#475569;">Comparison:</span> <strong id="eval-comparison-text">Improved</strong></div>
+                                </div>
+                            </div>
+
+                            <!-- Collapsed Technical Details Accordion -->
+                            <div class="meridian-accordion" id="fed-tech-accordion">
+                                <div class="accordion-header" onclick="toggleAccordion('fed-tech-body', 'fed-tech-arrow')">
+                                    <span>⚙️ Technical Details (Weights, Coefficients & Mathematical Proofs)</span>
+                                    <span id="fed-tech-arrow">▼ Click to Expand</span>
+                                </div>
+                                <div class="accordion-body" id="fed-tech-body" style="display:none;">
+                                    <div style="margin-bottom:10px;">
+                                        <span class="ai-badge source">Federated Learning Demonstration</span>
+                                        <span style="font-size:0.75rem; color:var(--text-muted); margin-left:8px;">Decentralized NumPy regression demonstration</span>
+                                    </div>
+                                    <div style="font-family:var(--font-mono); font-size:0.75rem; background:#F8FAFC; padding:12px; border-radius:4px; border:1px solid #E2E8F0; margin-bottom:10px;">
+                                        <div><strong>Global Linear Model Equation:</strong> <span id="tech-global-eq">y = 1.8421 * x + 14.6528</span></div>
+                                        <div><strong>Aggregation Method:</strong> Sample-Weighted FedAvg: w_i = n_i / Total_N</div>
+                                        <div style="margin-top:6px; color:#475569;"><strong>MAE Definition:</strong> Mean Absolute Error measures the average magnitude of prediction errors in daily unit demand.</div>
+                                        <div style="color:#475569;"><strong>RMSE Definition:</strong> Root Mean Square Error squares errors before averaging, penalizing large unexpected surges more severely.</div>
+                                    </div>
+                                    <div id="tech-nodes-breakdown" style="font-size:0.75rem;">
+                                        <!-- Node coefficients injected by loadFederatedModelStatus() -->
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Model Update History Table -->
+                            <div class="margin-top-md">
+                                <h4 style="font-size:0.85rem; font-weight:700; margin-bottom:8px; color:#334155;">Model Version & Aggregation History</h4>
+                                <div class="table-responsive">
+                                    <table class="meridian-table" id="fed-history-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Version</th>
+                                                <th>Algorithm</th>
+                                                <th>Contributing Nodes</th>
+                                                <th>Aggregation Method</th>
+                                                <th>MAE / RMSE</th>
+                                                <th>Status</th>
+                                                <th>Updated At</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="fed-history-tbody">
+                                            <!-- Loaded dynamically -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SUB-TAB 4: SECURITY & SYSTEM ADMINISTRATION (NATIONAL ADMIN ONLY) -->
+                    <div id="commtab-security" class="comm-subtab-content" style="display:none;">
+                        <div class="content-card">
+                            <div class="card-header">
+                                <div>
+                                    <h3 class="card-title">Security & System Administration Telemetry</h3>
+                                    <span class="card-tag">Read-Only Cryptographic & RBAC Verification</span>
+                                </div>
+                                <button type="button" class="btn btn-sm btn-outline" onclick="loadSecurityMonitoringStatus()">🔄 Run Security Check</button>
+                            </div>
+
+                            <!-- Security Warning Banner (if any) -->
+                            <div style="background:#ECFDF5; border:1px solid #A7F3D0; border-radius:var(--radius-sm); padding:12px 16px; margin-bottom:14px; display:flex; align-items:center; gap:10px;">
+                                <span style="font-size:1.2rem;">🛡️</span>
+                                <div>
+                                    <span style="font-weight:700; color:#065F46; font-size:0.85rem;">All Security Subsystems Operational</span>
+                                    <div style="font-size:0.75rem; color:#047857;">Zero secrets exposed. Encryption keys, passwords, hashes, and session tokens remain strictly secured inside protected server vaults.</div>
+                                </div>
+                            </div>
+
+                            <!-- Security Telemetry Tiles -->
+                            <div class="security-status-grid" id="security-telemetry-grid">
+                                <!-- Populated dynamically by loadSecurityMonitoringStatus() -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SUB-TAB 5: INTEGRATIONS (FHIR EXPORT) (NATIONAL ADMIN ONLY) -->
+                    <div id="commtab-integrations" class="comm-subtab-content" style="display:none;">
+                        <div class="content-card">
+                            <div class="card-header">
+                                <div>
+                                    <h3 class="card-title">Standards-Compatible Interoperability & Data Export</h3>
+                                    <span class="card-tag">HL7 FHIR R4 Specification</span>
+                                </div>
+                                <span class="ai-badge source">FHIR-Compatible Demo Export</span>
+                            </div>
+
+                            <div style="background:#F8FAFC; border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:16px; margin-bottom:16px;">
+                                <h4 style="font-size:0.85rem; font-weight:700; margin-bottom:6px;">Export Standards-Compatible Data</h4>
+                                <p style="font-size:0.8rem; color:var(--text-secondary); line-height:1.45; margin-bottom:12px;">
+                                    Generate interoperable HL7 FHIR R4 resource bundles containing <code>MedicationStatement</code> and <code>Location</code> entities. Exports strictly enforce authorized data scopes and exclude sensitive PII.
+                                </p>
+                                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:12px; margin-bottom:14px;">
+                                    <div>
+                                        <label for="fhir-format-select" style="font-size:0.75rem; font-weight:600; display:block; margin-bottom:4px;">Export Format:</label>
+                                        <select id="fhir-format-select" class="login-input">
+                                            <option value="json">HL7 FHIR R4 Bundle (JSON)</option>
+                                            <option value="ndjson">FHIR Bulk Data (NDJSON)</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label for="fhir-scope-select" style="font-size:0.75rem; font-weight:600; display:block; margin-bottom:4px;">Jurisdictional Scope:</label>
+                                        <select id="fhir-scope-select" class="login-input">
+                                            <option value="NATIONAL">Nationwide (All Districts)</option>
+                                            <option value="DIST-NORTH">District North Only</option>
+                                            <option value="DIST-SOUTH">District South Only</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label for="fhir-date-from" style="font-size:0.75rem; font-weight:600; display:block; margin-bottom:4px;">Date Range (From):</label>
+                                        <input type="date" id="fhir-date-from" class="login-input">
+                                    </div>
+                                    <div>
+                                        <label for="fhir-date-to" style="font-size:0.75rem; font-weight:600; display:block; margin-bottom:4px;">Date Range (To):</label>
+                                        <input type="date" id="fhir-date-to" class="login-input">
+                                    </div>
+                                </div>
+                                <div style="display:flex; justify-content:space-between; align-items:center;">
+                                    <span style="font-size:0.75rem; color:var(--text-muted);">Resource Types: MedicationStatement, Location • Demo Export</span>
+                                    <button type="button" class="btn btn-primary" onclick="downloadFhirExport()">📥 Download FHIR Bundle</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SUB-TAB 6: AUDIT LOGS LEDGER -->
+                    <div id="commtab-audit" class="comm-subtab-content" style="display:none;">
+                        <div class="content-card">
+                            <div class="card-header">
+                                <h3 class="card-title">System Audit & Compliance Ledger</h3>
+                                <button type="button" class="btn btn-sm btn-outline" onclick="loadEmbeddedAuditLogs()">🔄 Refresh Audit Trail</button>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="meridian-table" id="comm-audit-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Timestamp</th>
+                                            <th>User</th>
+                                            <th>Role</th>
+                                            <th>Action</th>
+                                            <th>Target</th>
+                                            <th>Result</th>
+                                            <th>Reason / Details</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="comm-audit-tbody">
+                                        <!-- Loaded dynamically -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SUB-TAB 7: REPLIES & ACKNOWLEDGEMENTS (PHC STAFF) -->
+                    <div id="commtab-acknowledgements" class="comm-subtab-content" style="display:none;">
+                        <div class="content-card">
+                            <div class="card-header">
+                                <h3 class="card-title">Signed Directives & Compliance Acknowledgements</h3>
+                                <span class="card-tag">Facility Accountability Log</span>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="meridian-table" id="comm-ack-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Directive Subject</th>
+                                            <th>Issuer</th>
+                                            <th>Received At</th>
+                                            <th>Acknowledged At</th>
+                                            <th>Signing Notes</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="comm-ack-tbody">
+                                        <!-- Loaded dynamically -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SUB-TAB 8: PHC ACTIVITY STREAM -->
+                    <div id="commtab-activity" class="comm-subtab-content" style="display:none;">
+                        <div class="content-card">
+                            <div class="card-header">
+                                <h3 class="card-title">Facility Operational Activity Stream</h3>
+                                <span class="card-tag">Recent Real-Time Events</span>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="meridian-table" id="comm-activity-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Time</th>
+                                            <th>Event Category</th>
+                                            <th>Facility</th>
+                                            <th>Details</th>
+                                            <th>Operator</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="comm-activity-tbody">
+                                        <!-- Loaded dynamically -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+            </main>
+        </div>
+    </div>
+
+    <!-- ============================================================== -->
+    <!-- MODALS & DIALOGS -->
+    <!-- ============================================================== -->
+
+    <!-- 1. COMPOSE OFFICIAL MESSAGE MODAL -->
+    <div id="compose-message-modal" class="meridian-modal-overlay">
+        <div class="meridian-modal-content">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title">
+                    <span>✍️</span> Compose Official Directive / Notice
+                </div>
+                <button type="button" class="meridian-modal-close" onclick="closeComposeMessageModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <div class="form-group" id="msg-recipient-group">
+                    <label for="msg-recipient-role">Recipient Level:</label>
+                    <select id="msg-recipient-role" class="login-input">
+                        <option value="DISTRICT_OFFICER">District Officer</option>
+                        <option value="PHC_STAFF">PHC Operational Staff</option>
+                        <option value="NATIONAL_ADMIN">National Command Center</option>
+                    </select>
                 </div>
 
-                <div class="info-card">
-                    <div class="info-icon">💡</div>
+                <div class="form-group">
+                    <label for="msg-priority">Priority Level:</label>
+                    <select id="msg-priority" class="login-input">
+                        <option value="NORMAL">Normal — Routine Notice</option>
+                        <option value="URGENT">Urgent — Action Required Today</option>
+                        <option value="EMERGENCY">Emergency — Immediate Attention</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="msg-subject">Subject:</label>
+                    <input type="text" id="msg-subject" class="login-input" placeholder="e.g. Mandatory ORS Buffer Stock Inspection" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="msg-body">Directive Details / Instructions:</label>
+                    <textarea id="msg-body" class="login-input" style="height:100px; resize:vertical;" placeholder="Enter clear official instructions..." required></textarea>
+                </div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeComposeMessageModal()">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="submitSendMessage()">Dispatch Directive</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. CREATE RESOURCE REQUEST MODAL -->
+    <div id="create-transfer-modal" class="meridian-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="req-modal-title">
+        <div class="meridian-modal-content">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title" id="req-modal-title">
+                    <span>⚡</span> Request Medicine / Resource Redistribution
+                </div>
+                <button type="button" class="meridian-modal-close" aria-label="Close" onclick="closeCreateTransferModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <div class="form-group">
+                    <label for="req-medicine">Medicine / Essential Item: *</label>
+                    <select id="req-medicine" class="login-input" onchange="updateTransferCurrentStockHint()" required>
+                        <option value="ORS Packets">ORS Packets</option>
+                        <option value="Paracetamol 500mg">Paracetamol 500mg</option>
+                        <option value="Amoxicillin 250mg">Amoxicillin 250mg</option>
+                        <option value="IV fluids (RL)">IV fluids (RL)</option>
+                        <option value="Chlorine tablets">Chlorine tablets</option>
+                        <option value="Iron folic acid">Iron folic acid</option>
+                    </select>
+                    <div class="form-hint" id="req-stock-hint">Current local stock: <strong id="req-curr-stock">--</strong> units</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="req-quantity">Requested Units (Quantity): *</label>
+                    <input type="number" id="req-quantity" class="login-input" min="1" step="5" value="50" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="req-urgency">Urgency Assessment: *</label>
+                    <select id="req-urgency" class="login-input">
+                        <option value="CRITICAL">Critical — Stock-out imminent (&lt; 24h)</option>
+                        <option value="URGENT">Urgent — Approaching safe buffer limit</option>
+                        <option value="NORMAL">Normal — Routine inventory rebalance</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="req-date">Required By Date:</label>
+                    <input type="date" id="req-date" class="login-input">
+                </div>
+
+                <div class="form-group">
+                    <label for="req-reason">Clinical / Operational Justification: *</label>
+                    <textarea id="req-reason" class="login-input" style="height:70px;" placeholder="Explain cause of shortage (e.g. paediatric diarrhoeal spike, delayed central delivery)..." required></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="req-notes">Optional Notes / Preferred Donor:</label>
+                    <input type="text" id="req-notes" class="login-input" placeholder="e.g. Request dispatch from Beta Sector if stock permits">
+                </div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeCreateTransferModal()">Cancel</button>
+                <button type="button" id="btn-submit-transfer-request" class="btn btn-primary" onclick="submitCreateTransfer()">Submit Resource Request</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. REVIEW TRANSFER MODAL (FOR DISTRICT OFFICER) -->
+    <div id="review-transfer-modal" class="meridian-modal-overlay">
+        <div class="meridian-modal-content">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title">
+                    <span>⚖️</span> Officer Review: Resource Redistribution
+                </div>
+                <button type="button" class="meridian-modal-close" onclick="closeReviewTransferModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <div style="background:#F8FAFC; padding:12px; border-radius:8px; border:1px solid #E2E8F0; margin-bottom:12px; font-size:0.85rem;">
+                    <div><strong>Transfer ID:</strong> <span id="rev-transfer-id">--</span></div>
+                    <div><strong>Requester:</strong> <span id="rev-target-phc">--</span></div>
+                    <div><strong>Medicine:</strong> <span id="rev-medicine">--</span></div>
+                    <div><strong>Requested Qty:</strong> <span id="rev-qty">--</span></div>
+                    <div><strong>Recommended Donor:</strong> <span id="rev-donor-phc">--</span></div>
+                </div>
+
+                <div class="form-group">
+                    <label for="rev-action-select">Decision Action:</label>
+                    <select id="rev-action-select" class="login-input" onchange="handleReviewActionChange(this.value)">
+                        <option value="APPROVE">Approve Suggested Transfer</option>
+                        <option value="MODIFY_AND_APPROVE">Modify Transfer Quantity & Approve</option>
+                        <option value="REJECT">Reject Request</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="rev-modify-qty-group" style="display:none;">
+                    <label for="rev-modified-qty">Approved Quantity:</label>
+                    <input type="number" id="rev-modified-qty" class="login-input" min="1">
+                    <span style="font-size:0.7rem; color:var(--text-muted);">Adjusted amount that preserves donor safe stock threshold.</span>
+                </div>
+
+                <div class="form-group">
+                    <label for="rev-reason">Official Decision Rationale:</label>
+                    <input type="text" id="rev-reason" class="login-input" placeholder="e.g. Verified donor surplus; route unobstructed" required>
+                </div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeReviewTransferModal()">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="submitReviewTransfer()">Confirm Decision</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 4. RECORD STOCK RECEIVED MODAL -->
+    <div id="record-stock-received-modal" class="meridian-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="rx-modal-title">
+        <div class="meridian-modal-content">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title" id="rx-modal-title">
+                    <span>📥</span> Record Stock Received
+                </div>
+                <button type="button" class="meridian-modal-close" aria-label="Close" onclick="closeRecordStockReceivedModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <div class="form-group">
+                    <label for="rx-medicine">Medicine Name: *</label>
+                    <select id="rx-medicine" class="login-input" required>
+                        <option value="ORS Packets">ORS Packets</option>
+                        <option value="Paracetamol 500mg">Paracetamol 500mg</option>
+                        <option value="Amoxicillin 250mg">Amoxicillin 250mg</option>
+                        <option value="IV fluids (RL)">IV fluids (RL)</option>
+                        <option value="Chlorine tablets">Chlorine tablets</option>
+                        <option value="Iron folic acid">Iron folic acid</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="rx-quantity">Quantity Received: *</label>
+                    <input type="number" id="rx-quantity" class="login-input" min="1" value="50" required>
+                    <div id="rx-qty-error" class="form-hint error" style="display:none;">Quantity must be greater than zero.</div>
+                </div>
+                <div class="form-group">
+                    <label for="rx-batch">Batch Number:</label>
+                    <input type="text" id="rx-batch" class="login-input" placeholder="e.g. BAT-2026-X82">
+                </div>
+                <div class="form-group">
+                    <label for="rx-expiry">Expiry Date:</label>
+                    <input type="date" id="rx-expiry" class="login-input">
+                </div>
+                <div class="form-group">
+                    <label for="rx-supplier">Supplier / Source:</label>
+                    <input type="text" id="rx-supplier" class="login-input" value="District Central Medical Depot">
+                </div>
+                <div class="form-group">
+                    <label for="rx-date">Receipt Date:</label>
+                    <input type="date" id="rx-date" class="login-input">
+                </div>
+                <div class="form-group">
+                    <label for="rx-notes">Notes / Observations:</label>
+                    <textarea id="rx-notes" class="login-input" style="height:60px;" placeholder="Optional inspection notes, packaging integrity..."></textarea>
+                </div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeRecordStockReceivedModal()">Cancel</button>
+                <button type="button" id="btn-submit-stock-received" class="btn btn-primary" onclick="submitRecordStockReceived()">Add to Inventory</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 5. RECORD STOCK CONSUMED MODAL -->
+    <div id="record-stock-consumed-modal" class="meridian-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="cx-modal-title">
+        <div class="meridian-modal-content">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title" id="cx-modal-title">
+                    <span>📤</span> Record Stock Dispensed / Consumed
+                </div>
+                <button type="button" class="meridian-modal-close" aria-label="Close" onclick="closeRecordStockConsumedModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <div class="form-group">
+                    <label for="cx-medicine">Medicine Name: *</label>
+                    <select id="cx-medicine" class="login-input" onchange="updateDispenseAvailableStockHint()" required>
+                        <option value="ORS Packets">ORS Packets</option>
+                        <option value="Paracetamol 500mg">Paracetamol 500mg</option>
+                        <option value="Amoxicillin 250mg">Amoxicillin 250mg</option>
+                        <option value="IV fluids (RL)">IV fluids (RL)</option>
+                        <option value="Chlorine tablets">Chlorine tablets</option>
+                        <option value="Iron folic acid">Iron folic acid</option>
+                    </select>
+                    <div class="form-hint" id="cx-stock-hint">Available in stock: <strong id="cx-avail-qty">--</strong> units</div>
+                </div>
+                <div class="form-group">
+                    <label for="cx-quantity">Quantity Dispensed: *</label>
+                    <input type="number" id="cx-quantity" class="login-input" min="1" value="10" oninput="validateDispenseQuantity()" required>
+                    <div id="cx-qty-warning" class="form-hint warning" style="display:none;">⚠️ Warning: Quantity exceeds current available stock!</div>
+                </div>
+                <div class="form-group">
+                    <label for="cx-reason">Usage / Dispensation Category:</label>
+                    <select id="cx-reason" class="login-input">
+                        <option value="Routine OPD Dispensation">Routine OPD Dispensation</option>
+                        <option value="Emergency Treatment">Emergency Treatment</option>
+                        <option value="Maternal & Child Health">Maternal & Child Health</option>
+                        <option value="Inpatient Ward Use">Inpatient Ward Use</option>
+                        <option value="Damaged / Expired Disposal">Damaged / Expired Disposal</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="cx-date">Transaction Date:</label>
+                    <input type="date" id="cx-date" class="login-input">
+                </div>
+                <div class="form-group">
+                    <label for="cx-notes">Clinical Notes / Patient Category:</label>
+                    <textarea id="cx-notes" class="login-input" style="height:60px;" placeholder="e.g. Diarrhoeal presentations, dehydration treatment..."></textarea>
+                </div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeRecordStockConsumedModal()">Cancel</button>
+                <button type="button" id="btn-submit-stock-consumed" class="btn btn-primary" onclick="submitRecordStockConsumed()">Deduct Stock</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 5B. UPDATE FACILITY EQUIPMENT MODAL -->
+    <div id="update-equipment-modal" class="meridian-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="eq-modal-title">
+        <div class="meridian-modal-content">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title" id="eq-modal-title">
+                    <span>🔧</span> Update Facility Equipment Status
+                </div>
+                <button type="button" class="meridian-modal-close" aria-label="Close" onclick="closeEditEquipmentModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <input type="hidden" id="eq-edit-id">
+                <div class="form-group">
+                    <label for="eq-edit-name">Equipment Name:</label>
+                    <input type="text" id="eq-edit-name" class="login-input" readonly style="background:#F1F5F9; cursor:not-allowed;">
+                </div>
+                <div class="form-group">
+                    <label for="eq-edit-category">Category:</label>
+                    <input type="text" id="eq-edit-category" class="login-input" readonly style="background:#F1F5F9; cursor:not-allowed;">
+                </div>
+                <div class="form-group">
+                    <label for="eq-edit-quantity">Total Quantity: *</label>
+                    <input type="number" id="eq-edit-quantity" class="login-input" min="0" required oninput="validateEquipmentForm()">
+                </div>
+                <div class="form-group">
+                    <label for="eq-edit-status">Operational Status: *</label>
+                    <select id="eq-edit-status" class="login-input" required>
+                        <option value="OPERATIONAL">OPERATIONAL — Ready for immediate clinical use</option>
+                        <option value="UNDER_MAINTENANCE">UNDER_MAINTENANCE — Service inspection in progress</option>
+                        <option value="CRITICAL_DEFICIT">CRITICAL_DEFICIT — Out of order / Deficit alert</option>
+                        <option value="STANDBY">STANDBY — Reserve buffer on standby</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="eq-edit-maint-count">Under Maintenance Units:</label>
+                    <input type="number" id="eq-edit-maint-count" class="login-input" min="0" value="0" required oninput="validateEquipmentForm()">
+                    <div id="eq-maint-error" class="form-hint error" style="display:none;">Under-maintenance count cannot exceed total quantity.</div>
+                </div>
+                <div class="form-group">
+                    <label for="eq-edit-notes">Maintenance Notes / Location:</label>
+                    <textarea id="eq-edit-notes" class="login-input" style="height:60px;" placeholder="e.g. Manifold inspected, scheduled bi-monthly test..."></textarea>
+                </div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeEditEquipmentModal()">Cancel</button>
+                <button type="button" id="btn-submit-equipment" class="btn btn-primary" onclick="submitEditEquipment()">Save Equipment Status</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- 5B. READ-ONLY PHC MONITORING DETAIL MODAL -->
+    <div id="phc-monitoring-detail-modal" class="meridian-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="phc-detail-modal-title">
+        <div class="meridian-modal-content" style="max-width:920px; max-height:90vh; overflow-y:auto;">
+            <div class="meridian-modal-header" style="position:sticky; top:0; background:#FFFFFF; z-index:10;">
+                <div>
+                    <div class="meridian-modal-title" id="phc-detail-modal-title">
+                        <span>🏥</span> <span id="modal-phc-name-title">Primary Health Centre Telemetry</span>
+                    </div>
+                    <div style="font-size:0.775rem; color:#64748B; margin-top:2px;" id="modal-phc-meta-subtitle">
+                        Assigned District Facility Roster • Read-Only Telemetry
+                    </div>
+                </div>
+                <button type="button" class="meridian-modal-close" aria-label="Close" onclick="closePHCDetailsModal()">×</button>
+            </div>
+            <div class="meridian-modal-body" style="padding-top:12px;">
+                <!-- Telemetry Header Status Bar -->
+                <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:12px 16px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
                     <div>
-                        <strong>Human-in-the-Loop Protocol:</strong> Recommendations are generated by comparing predicted shortage PHCs against surplus donor PHCs. 
-                        <strong>No transfer is executed automatically.</strong> Every recommendation presents underlying calculation numbers for human audit before approval.
+                        <div style="font-size:0.75rem; font-weight:700; color:#64748B; text-transform:uppercase;">Facility Location & Tier</div>
+                        <div style="font-size:0.9rem; font-weight:700; color:#0F172A;" id="modal-phc-location">Connaught Place, New Delhi (DIST-NORTH)</div>
+                    </div>
+                    <div>
+                        <div style="font-size:0.75rem; font-weight:700; color:#64748B; text-transform:uppercase;">Last Data Submission</div>
+                        <div style="font-size:0.9rem; font-weight:700; color:#0F172A;" id="modal-phc-last-sync">Today 16:30</div>
+                    </div>
+                    <div id="modal-phc-badges-bar" style="display:flex; gap:6px;">
+                        <span class="badge-status normal" id="modal-phc-rep-badge">Reporting Online</span>
+                        <span class="badge-status normal" id="modal-phc-overall-badge">Normal</span>
                     </div>
                 </div>
 
-                <div class="card shadow-sm margin-top-lg">
-                    <div class="card-header">
-                        <h3>Active Transfer Recommendations</h3>
-                        <button class="btn btn-outline" onclick="loadRedistributionRecommendations()">🔄 Refresh Engine</button>
+                <!-- 1. Medicine Stock Reserves & Shortage Alerts -->
+                <div class="margin-bottom-md">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <h4 style="font-size:0.9rem; font-weight:700; color:#0F172A;">💊 Medicine Inventory & Stock Reserves</h4>
+                        <span class="card-tag" id="modal-phc-stockout-tag">All Stock Safe</span>
                     </div>
-                    <div id="recommendations-container" class="recommendations-list">
-                        <!-- Recommendation cards injected here -->
-                    </div>
-                </div>
-
-                <div class="card shadow-sm margin-top-lg">
-                    <div class="card-header">
-                        <h3>Transfer Audit History Log</h3>
-                    </div>
-                    <div class="table-responsive">
-                        <table class="table" id="transfer-history-table">
+                    <div class="table-responsive" style="max-height:220px; border:1px solid #E2E8F0; border-radius:6px;">
+                        <table class="meridian-table" id="modal-phc-inventory-table">
                             <thead>
                                 <tr>
-                                    <th>ID</th>
-                                    <th>Source Donor</th>
-                                    <th>Target PHC</th>
-                                    <th>Medicine</th>
-                                    <th>Quantity</th>
-                                    <th>ETA</th>
+                                    <th>Medicine Name</th>
+                                    <th>Current Stock</th>
+                                    <th>Safe Par Level</th>
+                                    <th>Stock Ratio</th>
+                                    <th>3-Day Linear Forecast</th>
                                     <th>Status</th>
-                                    <th>Timestamp</th>
                                 </tr>
                             </thead>
-                            <tbody>
+                            <tbody id="modal-phc-inventory-tbody">
                                 <!-- Populated dynamically -->
                             </tbody>
                         </table>
                     </div>
                 </div>
-            </section>
 
-            <!-- 4. DEMAND FORECASTING & EXPLAINABILITY -->
-            <section id="forecasting-panel" class="tab-content">
-                <div class="section-header">
-                    <h2>NumPy Linear Regression Demand Forecasting</h2>
-                    <span class="badge badge-accent">No External ML Libs</span>
-                </div>
-
-                <div class="content-grid-2col">
-                    <div class="card shadow-sm">
-                        <div class="card-header">
-                            <h3>Forecast Selector</h3>
+                <!-- 2. Beds & Equipment Grid -->
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
+                    <!-- Beds -->
+                    <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:8px; padding:14px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <h4 style="font-size:0.85rem; font-weight:700; color:#0F172A;">🛏️ Bed Capacity & Ward Status</h4>
+                            <span class="badge-status normal" id="modal-phc-bed-occ-tag">Occupancy: --%</span>
                         </div>
-                        <div class="form-layout">
-                            <div class="form-group">
-                                <label>Select PHC Node:</label>
-                                <select id="forecast-phc-select" onchange="updateForecastView()">
-                                    <option value="PHC-001">PHC-001 (Alpha Sector)</option>
-                                    <option value="PHC-002">PHC-002 (Beta Central)</option>
-                                    <option value="PHC-003">PHC-003 (Gamma Rural)</option>
-                                    <option value="PHC-004">PHC-004 (Delta Community)</option>
-                                </select>
+                        <div style="display:flex; justify-content:space-around; text-align:center; padding:8px 0; background:#F8FAFC; border-radius:6px; margin-bottom:8px;">
+                            <div>
+                                <div style="font-size:1.4rem; font-weight:800; color:#0F172A;" id="modal-phc-total-beds">--</div>
+                                <div style="font-size:0.7rem; color:#64748B;">Total Beds</div>
                             </div>
-                            <div class="form-group">
-                                <label>Select Medicine:</label>
-                                <select id="forecast-med-select" onchange="updateForecastView()">
-                                    <option value="ORS Packets">ORS Packets</option>
-                                    <option value="Paracetamol 500mg">Paracetamol 500mg</option>
-                                    <option value="Amoxicillin 250mg">Amoxicillin 250mg</option>
-                                </select>
+                            <div>
+                                <div style="font-size:1.4rem; font-weight:800; color:#DC2626;" id="modal-phc-occ-beds">--</div>
+                                <div style="font-size:0.7rem; color:#64748B;">Occupied Beds</div>
+                            </div>
+                            <div>
+                                <div style="font-size:1.4rem; font-weight:800; color:#16A34A;" id="modal-phc-avail-beds">--</div>
+                                <div style="font-size:0.7rem; color:#64748B;">Available Beds</div>
                             </div>
                         </div>
+                        <div style="font-size:0.75rem; color:#64748B;" id="modal-phc-bed-notes">Ward Notes: Standard inpatient allocation</div>
+                    </div>
 
-                        <div class="chart-container margin-top-md">
-                            <canvas id="forecastChart"></canvas>
+                    <!-- Equipment -->
+                    <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:8px; padding:14px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <h4 style="font-size:0.85rem; font-weight:700; color:#0F172A;">⚙️ Critical Equipment Readiness</h4>
+                            <span class="badge-status normal" id="modal-phc-equip-tag">All Operational</span>
                         </div>
-                    </div>
-
-                    <!-- Right: Math Explainability Panel -->
-                    <div class="card shadow-sm">
-                        <div class="card-header">
-                            <h3>Underlying Math & Explainability Panel</h3>
-                        </div>
-                        <div id="explainability-box" class="explainability-container">
-                            <!-- Formula & parameters injected here -->
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <!-- 5. FEDERATED LEARNING PANEL (FedAvg) -->
-            <section id="federated-panel" class="tab-content">
-                <div class="section-header">
-                    <h2>Federated Learning Demo (3-Node NumPy FedAvg)</h2>
-                    <button class="btn btn-primary" onclick="triggerFederatedTraining()">▶ Run Federated Training & Aggregation</button>
-                </div>
-
-                <div class="info-card">
-                    <div class="info-icon">🔒</div>
-                    <div>
-                        <strong>Data Sovereignty Architecture:</strong> Each PHC trains its local <code>np.polyfit</code> model on its local consumption array. 
-                        <strong>Only model weights [slope, intercept] leave the node.</strong> The central server executes <code>np.mean(weights, axis=0)</code> to produce the Global Model.
-                    </div>
-                </div>
-
-                <div class="fl-grid margin-top-lg">
-                    <div class="fl-card" id="fl-node1-card">
-                        <div class="fl-node-header">
-                            <span>PHC Node 1 (Alpha)</span>
-                            <span class="badge badge-info">Local Model</span>
-                        </div>
-                        <div class="fl-weights" id="node1-weights">Loading...</div>
-                        <div class="fl-data-tag">Raw patient records: <strong>Kept Local</strong></div>
-                    </div>
-
-                    <div class="fl-card" id="fl-node2-card">
-                        <div class="fl-node-header">
-                            <span>PHC Node 2 (Beta)</span>
-                            <span class="badge badge-info">Local Model</span>
-                        </div>
-                        <div class="fl-weights" id="node2-weights">Loading...</div>
-                        <div class="fl-data-tag">Raw patient records: <strong>Kept Local</strong></div>
-                    </div>
-
-                    <div class="fl-card" id="fl-node3-card">
-                        <div class="fl-node-header">
-                            <span>PHC Node 3 (Gamma)</span>
-                            <span class="badge badge-info">Local Model</span>
-                        </div>
-                        <div class="fl-weights" id="node3-weights">Loading...</div>
-                        <div class="fl-data-tag">Raw patient records: <strong>Kept Local</strong></div>
-                    </div>
-                </div>
-
-                <div class="card shadow-sm margin-top-lg highlight-card">
-                    <div class="card-header">
-                        <h3>Averaged Global Model (FedAvg Aggregator)</h3>
-                        <span class="badge badge-success">np.mean(weights)</span>
-                    </div>
-                    <div class="global-model-body" id="global-model-box">
-                        <!-- Injected dynamically -->
-                    </div>
-                </div>
-            </section>
-
-            <!-- 6. NATIONAL & BRICS SIMULATION PANEL -->
-            <section id="national-brics-panel" class="tab-content">
-                <div class="section-header">
-                    <h2>National Command Dashboard & BRICS Simulation</h2>
-                    <span class="badge badge-simulated">BRICS Simulation Mode</span>
-                </div>
-
-                <div class="alert-banner alert-simulated">
-                    <div class="banner-icon">🌐</div>
-                    <div>
-                        <strong>HONEST SIMULATION LABEL:</strong> Nodes 3 & 4 are relabelled as partner nations (Brazil & South Africa) to demonstrate cross-border federated aggregation without actual cross-border network deployments.
-                    </div>
-                </div>
-
-                <div class="brics-grid margin-top-lg" id="brics-nodes-container">
-                    <!-- BRICS node cards injected here -->
-                </div>
-            </section>
-
-            <!-- 7. PRIVACY & ENCRYPTION INSPECTOR -->
-            <section id="privacy-panel" class="tab-content">
-                <div class="section-header">
-                    <h2>Privacy Layer & Field Encryption Inspector</h2>
-                </div>
-
-                <div class="card shadow-sm">
-                    <div class="card-header">
-                        <h3>Interactive Encryption & Differential Privacy Test</h3>
-                    </div>
-                    <div class="form-layout">
-                        <div class="form-group">
-                            <label for="privacy-input">Enter Sensitive Staff or Patient ID:</label>
-                            <input type="text" id="privacy-input" value="STF-DOCTOR-8842" placeholder="e.g. STF-101">
-                        </div>
-                        <button class="btn btn-primary" onclick="testPrivacyLayer()">🔐 Test Encryption & Noise</button>
-                    </div>
-
-                    <div id="privacy-results" class="margin-top-lg" style="display: none;">
-                        <div class="privacy-result-card">
-                            <h4>1. Fernet Symmetric Field Encryption</h4>
-                            <div class="code-block" id="res-encrypted">--</div>
-                        </div>
-
-                        <div class="privacy-result-card margin-top-md">
-                            <h4>2. Decryption Verification</h4>
-                            <div class="code-block" id="res-decrypted">--</div>
-                        </div>
-
-                        <div class="privacy-result-card margin-top-md">
-                            <h4>3. SHA-256 Tokenization (Public Identifier)</h4>
-                            <div class="code-block" id="res-token">--</div>
-                        </div>
-
-                        <div class="privacy-result-card margin-top-md">
-                            <h4>4. Differential Privacy Noise Simulation (Aggregate Counts)</h4>
-                            <div class="code-block" id="res-dp">--</div>
+                        <div id="modal-phc-equip-list" style="max-height:130px; overflow-y:auto; font-size:0.8rem;">
+                            <!-- Populated dynamically -->
                         </div>
                     </div>
                 </div>
-            </section>
 
-        </main>
+                <!-- 3. Staff Attendance & Patient Footfall Grid -->
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
+                    <!-- Staff Attendance -->
+                    <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:8px; padding:14px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <h4 style="font-size:0.85rem; font-weight:700; color:#0F172A;">🧑‍⚕️ Staff Attendance Roster</h4>
+                            <span class="badge-status normal" id="modal-phc-staff-count-tag">-- Present</span>
+                        </div>
+                        <div id="modal-phc-staff-list" style="max-height:140px; overflow-y:auto; font-size:0.8rem;">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Patient Footfall -->
+                    <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:8px; padding:14px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <h4 style="font-size:0.85rem; font-weight:700; color:#0F172A;">📈 Patient Footfall & Triage</h4>
+                            <span class="card-tag" id="modal-phc-footfall-total-tag">Today: -- OPD</span>
+                        </div>
+                        <div style="background:#F8FAFC; border-radius:6px; padding:10px; margin-bottom:8px; font-size:0.8rem;" id="modal-phc-footfall-demographics">
+                            <!-- Populated dynamically -->
+                        </div>
+                        <div style="font-size:0.75rem; color:#64748B;" id="modal-phc-footfall-history-note">
+                            Weekly volume pattern feeds linear demand forecasting engine.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4. Active Resource Requests & Alerts -->
+                <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:8px; padding:14px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <h4 style="font-size:0.85rem; font-weight:700; color:#0F172A;">⚡ Active Resource Requests & Transfers</h4>
+                        <span class="card-tag" id="modal-phc-transfers-count-tag">0 Active Transfers</span>
+                    </div>
+                    <div id="modal-phc-transfers-list" style="font-size:0.8rem;">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+            </div>
+            <div class="meridian-modal-footer" style="position:sticky; bottom:0; background:#FFFFFF; z-index:10; border-top:1px solid #E2E8F0; display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:0.75rem; color:#64748B;">🔒 Read-Only Surveillance View — Operational data entry restricted to assigned facility staff.</span>
+                <button type="button" class="btn btn-outline" onclick="closePHCDetailsModal()">Close Surveillance View</button>
+            </div>
+        </div>
     </div>
 
-    <script src="/static/app.js"></script>
+
+    <!-- 6. ADMINISTRATIVE OVERRIDE MODAL -->
+    <div id="admin-override-modal" class="meridian-modal-overlay">
+        <div class="meridian-modal-content">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title">
+                    <span style="color:#F59E0B;">⚠️</span> Administrative Operational Override
+                </div>
+                <button type="button" class="meridian-modal-close" onclick="closeOverrideModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <p style="font-size:0.85rem; color:#475569;">You are modifying lower-tier facility operational records from an administrative supervisory session. This action will be flagged as an <strong>OVERRIDE</strong> in the National Audit Log.</p>
+                <div class="form-group margin-top-sm">
+                    <label for="override-reason-input">Mandatory Audit Justification:</label>
+                    <textarea id="override-reason-input" class="login-input" style="height:80px;" placeholder="Document official rationale for direct operational correction..." required></textarea>
+                </div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeOverrideModal()">Cancel</button>
+                <button type="button" class="btn btn-warning" onclick="submitAdminOverride()">Confirm & Authorize Override</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 7. USER DIRECTORY MODAL -->
+    <div id="user-directory-modal" class="meridian-modal-overlay">
+        <div class="meridian-modal-content" style="max-width:850px;">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title">
+                    <span>👥</span> User Accounts Directory & Role Management
+                </div>
+                <button type="button" class="meridian-modal-close" onclick="closeUserDirectoryModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <div style="font-size:0.85rem; color:#64748B;">Active and configured accounts across national, district, and facility tiers:</div>
+                    <button type="button" class="btn btn-sm btn-primary" onclick="openCreateUserModal()">+ Create User</button>
+                </div>
+                <div class="table-responsive" style="max-height:400px;">
+                    <table class="meridian-table" id="directory-users-table">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Email</th>
+                                <th>Role</th>
+                                <th>Assigned Scope</th>
+                                <th>Status</th>
+                                <th>Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="directory-users-tbody">
+                            <!-- Populated dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeUserDirectoryModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 8. AUDIT LOGS MODAL -->
+    <div id="audit-logs-modal" class="meridian-modal-overlay">
+        <div class="meridian-modal-content" style="max-width:900px;">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title">
+                    <span>📜</span> System Audit Trail & Accountability History
+                </div>
+                <button type="button" class="meridian-modal-close" onclick="closeAuditLogsModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <div class="table-responsive" style="max-height:420px;">
+                    <table class="meridian-table" id="audit-logs-table">
+                        <thead>
+                            <tr>
+                                <th>Timestamp</th>
+                                <th>User</th>
+                                <th>Role</th>
+                                <th>Action</th>
+                                <th>Target / Record</th>
+                                <th>Prev Value</th>
+                                <th>New Value</th>
+                                <th>Result</th>
+                                <th>Reason</th>
+                            </tr>
+                        </thead>
+                        <tbody id="audit-logs-tbody">
+                            <!-- Populated dynamically -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeAuditLogsModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 9. PROFILE MODAL -->
+    <div id="profile-modal" class="meridian-modal-overlay">
+        <div class="meridian-modal-content">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title">
+                    <span>👤</span> User Account Profile
+                </div>
+                <button type="button" class="meridian-modal-close" onclick="closeProfileModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <div style="display:flex; align-items:center; gap:16px; margin-bottom:12px;">
+                    <div class="user-avatar" id="modal-profile-avatar" style="width:50px; height:50px; font-size:1.2rem;">NA</div>
+                    <div>
+                        <h3 id="modal-profile-name" style="font-size:1.15rem; font-weight:700; color:#0F172A;">Loading...</h3>
+                        <div style="display:flex; gap:6px; margin-top:4px;">
+                            <span class="badge-role admin" id="modal-profile-role">ROLE</span>
+                            <span class="badge-status active" id="modal-profile-status">ACTIVE</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:12px; display:flex; flex-direction:column; gap:8px; font-size:0.85rem;">
+                    <div><strong>User ID:</strong> <span id="modal-profile-id" style="font-family:var(--font-mono);">--</span></div>
+                    <div><strong>Email:</strong> <span id="modal-profile-email">--</span></div>
+                    <div><strong>Employee ID:</strong> <span id="modal-profile-emp-id">--</span></div>
+                    <div><strong>Assigned District:</strong> <span id="modal-profile-district">--</span></div>
+                    <div><strong>Assigned Facility:</strong> <span id="modal-profile-phc">--</span></div>
+                </div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-primary" onclick="closeProfileModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 10. CHANGE PASSWORD MODAL -->
+    <div id="change-password-modal" class="meridian-modal-overlay">
+        <div class="meridian-modal-content">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title">
+                    <span>🔑</span> Update Account Password
+                </div>
+                <button type="button" class="meridian-modal-close" onclick="closeChangePasswordModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <div class="form-group">
+                    <label for="chg-old-pwd">Current Password:</label>
+                    <input type="password" id="chg-old-pwd" class="login-input" required>
+                </div>
+                <div class="form-group">
+                    <label for="chg-new-pwd">New Password:</label>
+                    <input type="password" id="chg-new-pwd" class="login-input" placeholder="Min 6 characters" required>
+                </div>
+                <div id="change-pwd-error" style="display:none; color:var(--accent-rose); font-size:0.8rem;"></div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeChangePasswordModal()">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="submitChangePassword()">Update Password</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 11. CREATE USER MODAL (FOR ADMIN) -->
+    <div id="create-user-modal" class="meridian-modal-overlay">
+        <div class="meridian-modal-content">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title">
+                    <span>👤</span> Create New System User
+                </div>
+                <button type="button" class="meridian-modal-close" onclick="closeCreateUserModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <div class="form-group">
+                    <label for="new-user-name">Full Name:</label>
+                    <input type="text" id="new-user-name" class="login-input" placeholder="e.g. Ramesh Gupta" required>
+                </div>
+                <div class="form-group">
+                    <label for="new-user-email">Official Email:</label>
+                    <input type="email" id="new-user-email" class="login-input" placeholder="e.g. ramesh.gupta@meridian.health" required>
+                </div>
+                <div class="form-group">
+                    <label for="new-user-role">Role Hierarchy:</label>
+                    <select id="new-user-role" class="login-input" onchange="handleNewUserRoleChange(this.value)">
+                        <option value="PHC_STAFF">PHC Staff (Facility Operations)</option>
+                        <option value="DISTRICT_OFFICER">District Officer (District Administration)</option>
+                    </select>
+                </div>
+                <div class="form-group" id="new-user-district-group">
+                    <label for="new-user-district">Assigned District:</label>
+                    <select id="new-user-district" class="login-input">
+                        <option value="DIST-NORTH">North Capital District (DIST-NORTH)</option>
+                        <option value="DIST-SOUTH">Southern Health Corridor (DIST-SOUTH)</option>
+                    </select>
+                </div>
+                <div class="form-group" id="new-user-phc-group">
+                    <label for="new-user-phc">Assigned Facility:</label>
+                    <select id="new-user-phc" class="login-input">
+                        <option value="PHC-001">Alpha Sector PHC (PHC-001)</option>
+                        <option value="PHC-002">Beta Central PHC (PHC-002)</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="new-user-temp-pwd">Initial Password:</label>
+                    <input type="text" id="new-user-temp-pwd" class="login-input" value="Meridian@2026">
+                </div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeCreateUserModal()">Cancel</button>
+                <button type="button" class="btn btn-primary" onclick="submitCreateUser()">Create User</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 12. FORGOT PASSWORD MODAL -->
+    <div id="forgot-password-modal" class="meridian-modal-overlay">
+        <div class="meridian-modal-content">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title">
+                    <span>🔄</span> Password Recovery Assistance
+                </div>
+                <button type="button" class="meridian-modal-close" onclick="closeForgotPasswordModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <p style="font-size:0.85rem; color:#475569;">Enter your registered Meridian email address to generate a secure recovery token.</p>
+                <div class="form-group">
+                    <label for="forgot-email-input">Official Email:</label>
+                    <input type="email" id="forgot-email-input" class="login-input" placeholder="e.g. admin@meridian.health">
+                </div>
+                <div id="forgot-token-result" style="display:none; background:#F0FDF4; border:1px solid #86EFAC; color:#166534; padding:12px; border-radius:8px; font-size:0.825rem;">
+                    <div><strong>Demo Token Generated:</strong></div>
+                    <div id="forgot-token-code" style="font-family:var(--font-mono); font-size:0.95rem; font-weight:700; margin:6px 0; word-break:break-all;"></div>
+                    <div class="form-group margin-top-sm">
+                        <label for="forgot-new-pwd">Set New Password:</label>
+                        <input type="password" id="forgot-new-pwd" class="login-input" placeholder="New password (min 6 chars)">
+                    </div>
+                    <button type="button" class="btn btn-sm btn-primary margin-top-xs" onclick="submitResetPasswordWithToken()">Apply New Password</button>
+                </div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeForgotPasswordModal()">Close</button>
+                <button type="button" class="btn btn-primary" id="forgot-request-btn" onclick="submitForgotPasswordRequest()">Generate Token</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 13. MEDICINE BATCH PROVENANCE MODAL -->
+    <div id="provenance-modal" class="meridian-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="prov-modal-title">
+        <div class="meridian-modal-content" style="max-width:700px;">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title" id="prov-modal-title">
+                    <span>📦</span> Medicine Batch Provenance Ledger
+                </div>
+                <button type="button" class="meridian-modal-close" onclick="closeProvenanceModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+                    <div>
+                        <h3 id="prov-med-name" style="font-size:1.15rem; font-weight:700; color:var(--text-primary); margin:0;">Loading...</h3>
+                        <div style="font-family:var(--font-mono); font-size:0.8rem; color:var(--text-muted); margin-top:2px;">
+                            Batch ID: <strong id="prov-batch-id" style="color:var(--text-primary);">--</strong>
+                        </div>
+                    </div>
+                    <span class="ai-badge" id="prov-status-badge" style="background:#DCFCE7; color:#166534; font-size:0.75rem;">VERIFIED_AUTHENTIC</span>
+                </div>
+
+                <!-- Provenance Spec Table -->
+                <div style="background:#F8FAFC; border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:14px; margin-bottom:14px;">
+                    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:10px; font-size:0.8rem;">
+                        <div><span style="color:var(--text-muted);">Supplier / Source:</span> <strong id="prov-supplier">--</strong></div>
+                        <div><span style="color:var(--text-muted);">Manufacturing Date:</span> <strong id="prov-mfg-date">--</strong></div>
+                        <div><span style="color:var(--text-muted);">Expiry Date:</span> <strong id="prov-exp-date">--</strong></div>
+                        <div><span style="color:var(--text-muted);">Received Date:</span> <strong id="prov-rx-date">--</strong></div>
+                        <div><span style="color:var(--text-muted);">Original Quantity:</span> <strong id="prov-orig-qty">--</strong></div>
+                        <div><span style="color:var(--text-muted);">Current Remaining:</span> <strong id="prov-rem-qty">--</strong></div>
+                        <div><span style="color:var(--text-muted);">Current Location:</span> <strong id="prov-curr-phc">--</strong></div>
+                        <div><span style="color:var(--text-muted);">Ledger Checksum:</span> <code id="prov-checksum" style="font-size:0.7rem; background:#E2E8F0; padding:2px 4px; border-radius:3px;">--</code></div>
+                    </div>
+                </div>
+
+                <!-- Immutable Stock Transactions -->
+                <div>
+                    <h4 style="font-size:0.85rem; font-weight:700; margin-bottom:8px; color:#334155;">Stock Transaction History (Database Audit Trail)</h4>
+                    <div class="provenance-timeline" id="prov-timeline-container">
+                        <!-- Populated dynamically by openBatchProvenanceModal() -->
+                    </div>
+                </div>
+
+                <!-- Transfer History -->
+                <div id="prov-transfer-section" style="margin-top:14px; display:none;">
+                    <h4 style="font-size:0.85rem; font-weight:700; margin-bottom:8px; color:#334155;">Inter-Facility Transfer Custody</h4>
+                    <div class="table-responsive">
+                        <table class="meridian-table" style="font-size:0.75rem;" id="prov-transfers-table">
+                            <thead>
+                                <tr>
+                                    <th>Transfer ID</th>
+                                    <th>Source</th>
+                                    <th>Target</th>
+                                    <th>Quantity</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="prov-transfers-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="meridian-modal-footer">
+                <span style="font-size:0.72rem; color:var(--text-muted); margin-right:auto;">Database-Backed Provenance Ledger</span>
+                <button type="button" class="btn btn-outline" onclick="closeProvenanceModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 14. RUN FEDERATED MODEL UPDATE CONFIRMATION MODAL -->
+    <div id="fed-confirm-modal" class="meridian-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="fed-modal-title">
+        <div class="meridian-modal-content">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title" id="fed-modal-title">
+                    <span>⚡</span> Confirm Federated Model Update
+                </div>
+                <button type="button" class="meridian-modal-close" onclick="closeFederatedConfirmModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <p style="font-size:0.85rem; color:#475569; margin-bottom:12px;">
+                    You are about to execute a central federated aggregation pass across participating facility nodes (PHC-001, PHC-002, PHC-003).
+                </p>
+                <div style="background:#F0FDF4; border:1px solid #BBF7D0; border-radius:var(--radius-sm); padding:12px; font-size:0.8rem; color:#166534; margin-bottom:14px;">
+                    <strong>Privacy Guarantee:</strong> Raw patient records and operational data remain strictly on local nodes. Only local model weight vectors [slope, intercept] and sample counts are transmitted for weighted FedAvg aggregation.
+                </div>
+                <div class="form-group">
+                    <label for="fed-update-notes">Aggregation Reason / Audit Notes:</label>
+                    <input type="text" id="fed-update-notes" class="login-input" value="Scheduled national federated model aggregation pass" required>
+                </div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeFederatedConfirmModal()">Cancel</button>
+                <button type="button" id="btn-execute-fed-update" class="btn btn-primary" onclick="confirmExecuteFederatedUpdate()">
+                    <span id="fed-btn-spinner" style="display:none;">⏳</span>
+                    <span id="fed-btn-text">Execute Model Update</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 15. NATIONAL ALL INSIGHTS MODAL -->
+    <div id="all-insights-modal" class="meridian-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="all-insights-title">
+        <div class="meridian-modal-content" style="max-width:750px;">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title" id="all-insights-title">
+                    <span>🌐</span> Comprehensive National Supply Chain AI Insights
+                </div>
+                <button type="button" class="meridian-modal-close" onclick="closeAllInsightsModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <div id="all-insights-body-content" style="font-size:0.85rem;">
+                    <!-- Loaded dynamically -->
+                </div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-primary" onclick="closeAllInsightsModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 16. DEMO RESET CONFIRMATION MODAL (NATIONAL ADMIN ONLY) -->
+    <div id="demo-reset-confirm-modal" class="meridian-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="demo-reset-title" style="display:none;">
+        <div class="meridian-modal-content" style="max-width:500px;">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title" id="demo-reset-title">
+                    <span>🔄</span> Restore Demo Dataset
+                </div>
+                <button type="button" class="meridian-modal-close" aria-label="Close" onclick="closeDemoResetModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <div style="background:#FEF2F2; border:1px solid #FECACA; border-radius:var(--radius-sm); padding:14px; margin-bottom:14px;">
+                    <div style="font-weight:700; color:#B91C1C; font-size:0.85rem; margin-bottom:4px;">⚠️ Restore Initial Demonstration State</div>
+                    <p style="font-size:0.8rem; color:#7F1D1D; margin:0; line-height:1.4;">
+                        This action safely resets medicine inventories (ORS at 15 for Alpha, 320 for Beta), active transfer workflows, patient footfall, and attendance back to their predictable hackathon baseline.
+                    </p>
+                </div>
+                <p style="font-size:0.825rem; color:var(--text-secondary); margin:0;">
+                    An immutable audit log entry (<code>DEMO_DATA_RESET</code>) will be recorded. The database file and system schemas remain safe and intact.
+                </p>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeDemoResetModal()">Cancel</button>
+                <button type="button" class="btn btn-danger" id="confirm-demo-reset-btn" onclick="executeDemoReset()">
+                    <span id="demo-reset-spinner" style="display:none;">⏳</span>
+                    <span id="demo-reset-btn-text">Reset to Baseline State</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js?v=2026.5"></script>
 </body>
 </html>

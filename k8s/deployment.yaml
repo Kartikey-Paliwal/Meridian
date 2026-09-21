@@ -1,0 +1,45 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: meridian-enterprise-deployment
+  namespace: meridian-health
+  labels:
+    app: meridian-platform
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: meridian-platform
+  template:
+    metadata:
+      labels:
+        app: meridian-platform
+    spec:
+      containers:
+      - name: meridian-api
+        image: meridian/enterprise-platform:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: ENVIRONMENT
+          value: "production"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: meridian-service
+  namespace: meridian-health
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8000
+  selector:
+    app: meridian-platform

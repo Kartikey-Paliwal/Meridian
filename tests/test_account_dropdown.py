@@ -1,7 +1,8 @@
+import os
 import requests
 import urllib.request
 
-BASE_URL = "http://127.0.0.1:8080"
+BASE_URL = os.environ.get("MERIDIAN_BASE_URL", "http://127.0.0.1:8000")
 
 def run_checks():
     print("---------------------------------------------------------")

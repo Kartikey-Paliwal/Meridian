@@ -319,6 +319,26 @@
                             </div>
                         </div>
 
+                        <!-- National AI Insights Card -->
+                        <div class="ai-insights-card" id="nat-ai-insights-card">
+                            <div class="ai-header-flex">
+                                <div class="ai-title-wrap">
+                                    <span style="font-size:1.2rem;">🌐</span>
+                                    <div>
+                                        <h3 style="font-size:1rem; font-weight:700; color:var(--text-primary); margin:0;">National Supply Chain AI Intelligence & Demand Signals</h3>
+                                        <p style="font-size:0.75rem; color:var(--text-muted); margin:0;">Aggregated linear demand trajectories, repetitive shortage flags, and federated model performance</p>
+                                    </div>
+                                </div>
+                                <div style="display:flex; gap:8px; align-items:center;">
+                                    <span class="ai-badge">Federated & Linear Signals</span>
+                                    <button type="button" class="btn btn-sm btn-outline" onclick="openAllInsightsModal()">🔍 View All Insights</button>
+                                </div>
+                            </div>
+                            <div class="ai-grid-3" id="nat-ai-insights-grid">
+                                <!-- Populated dynamically by loadNationalAIInsights() -->
+                            </div>
+                        </div>
+
                         <!-- District Performance Table -->
                         <div class="content-card margin-top-md">
                             <div class="card-header">
@@ -409,6 +429,26 @@
                             </div>
                         </div>
 
+                        <!-- District AI Insights Card -->
+                        <div class="ai-insights-card" id="dist-ai-insights-card">
+                            <div class="ai-header-flex">
+                                <div class="ai-title-wrap">
+                                    <span style="font-size:1.2rem;">⚡</span>
+                                    <div>
+                                        <h3 style="font-size:1rem; font-weight:700; color:var(--text-primary); margin:0;">District AI Resource Surveillance & Proactive Balancing</h3>
+                                        <p style="font-size:0.75rem; color:var(--text-muted); margin:0;">Early warning shortage predictions and algorithmic donor matching for assigned district</p>
+                                    </div>
+                                </div>
+                                <div style="display:flex; gap:8px; align-items:center;">
+                                    <span class="ai-badge">Rule-Based & Linear Trends</span>
+                                    <span class="ai-badge source" id="dist-ai-reliability-badge">Reliability: High</span>
+                                </div>
+                            </div>
+                            <div id="dist-ai-insights-container">
+                                <!-- Populated dynamically by loadDistrictAIInsights() -->
+                            </div>
+                        </div>
+
                         <!-- PHC Monitoring Table -->
                         <div class="content-card margin-top-md">
                             <div class="card-header">
@@ -474,6 +514,27 @@
                             </div>
                         </div>
 
+                        <!-- PHC Staff AI Insights Card -->
+                        <div class="ai-insights-card" id="phc-ai-insights-card">
+                            <div class="ai-header-flex">
+                                <div class="ai-title-wrap">
+                                    <span style="font-size:1.2rem;">🤖</span>
+                                    <div>
+                                        <h3 style="font-size:1rem; font-weight:700; color:var(--text-primary); margin:0;">PHC AI Demand Forecast & Operational Signals</h3>
+                                        <p style="font-size:0.75rem; color:var(--text-muted); margin:0;">Linear Demand Forecast (3–7 days) using facility consumption history</p>
+                                    </div>
+                                </div>
+                                <div style="display:flex; gap:8px; align-items:center;">
+                                    <span class="ai-badge">Linear Demand Forecast</span>
+                                    <span class="ai-badge source" id="phc-ai-source-badge">Local linear model</span>
+                                    <span class="ai-badge" id="phc-ai-reliability-badge">Reliability: High</span>
+                                </div>
+                            </div>
+                            <div id="phc-ai-insights-container">
+                                <!-- Populated dynamically by loadPHCAIInsights() -->
+                            </div>
+                        </div>
+
                         <!-- Actions Required List Card (Discipline and Accountability) -->
                         <div class="content-card margin-top-md" style="border-left: 4px solid var(--accent-amber);">
                             <div class="card-header">
@@ -497,16 +558,18 @@
                 <section id="panel-operations" class="main-panel" style="display:none;">
                     <div class="panel-section-header">
                         <div>
-                            <h1 class="panel-title">Facility Operations & Daily Data Entry</h1>
-                            <p class="panel-subtitle">Manage medicine inventory, clinical bed allocation, biometric/RFID staff attendance, and patient flow</p>
+                            <h1 class="panel-title" id="ops-panel-title">Facility Operations & Daily Data Entry</h1>
+                            <p class="panel-subtitle" id="ops-panel-subtitle">Manage medicine inventory, clinical bed allocation, biometric/RFID staff attendance, and patient flow</p>
                         </div>
                         <div class="action-buttons" id="operations-role-actions">
                             <!-- Injected by role -->
                         </div>
                     </div>
 
-                    <!-- Operations Sub-Navigation Tabs -->
-                    <div class="sub-nav-bar">
+                    <!-- PHC STAFF DAILY DATA ENTRY CONTAINER -->
+                    <div id="ops-phc-container">
+                        <!-- Operations Sub-Navigation Tabs -->
+                        <div class="sub-nav-bar">
                         <button type="button" class="sub-nav-btn active" id="subnav-inventory" onclick="switchOpsSubTab('inventory')">
                             <span>💊 Medicine Inventory</span>
                         </button>
@@ -765,7 +828,196 @@
                                 </div>
                             </div>
                         </div>
+                    </div> <!-- closes opstab-footfall -->
+                </div> <!-- closes ops-phc-container -->
+
+                <!-- DISTRICT OFFICER READ-ONLY PHC MONITORING -->
+                <div id="ops-district-container" style="display:none;">
+                    <!-- Four compact summary cards for District Officer -->
+                    <div class="kpi-grid-4 margin-bottom-md">
+                        <div class="kpi-card highlight-blue">
+                            <div class="kpi-label">TOTAL PHCS</div>
+                            <div class="kpi-value" id="dist-kpi-total-phcs">--</div>
+                            <div class="kpi-subtext">Assigned district facilities</div>
+                        </div>
+                        <div class="kpi-card highlight-green">
+                            <div class="kpi-label">REPORTING TODAY</div>
+                            <div class="kpi-value" id="dist-kpi-reporting-today">--</div>
+                            <div class="kpi-subtext">Active telemetry online</div>
+                        </div>
+                        <div class="kpi-card highlight-amber">
+                            <div class="kpi-label">PHCS REQUIRING ATTENTION</div>
+                            <div class="kpi-value" id="dist-kpi-requiring-attention">--</div>
+                            <div class="kpi-subtext">Shortages or operational alerts</div>
+                        </div>
+                        <div class="kpi-card highlight-red">
+                            <div class="kpi-label">PENDING RESOURCE REQUESTS</div>
+                            <div class="kpi-value" id="dist-kpi-pending-requests">--</div>
+                            <div class="kpi-subtext">Awaiting redistribution review</div>
+                        </div>
                     </div>
+
+                    <div class="content-card">
+                        <div class="card-header">
+                            <div>
+                                <h3 class="card-title">Primary Health Centre Operational Surveillance</h3>
+                                <span class="card-tag">Assigned District Facility Roster (Read-Only)</span>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline" onclick="loadDistrictOperationsMonitoring()">🔄 Refresh Monitoring</button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="meridian-table" id="dist-ops-monitoring-table">
+                                <thead>
+                                    <tr>
+                                        <th>PHC Name</th>
+                                        <th>Last Data Update</th>
+                                        <th>Reporting Status</th>
+                                        <th>Medicine-Stock Status</th>
+                                        <th>Available / Occupied Beds</th>
+                                        <th>Staff Attendance</th>
+                                        <th>Patient Footfall Today</th>
+                                        <th>Active Alerts</th>
+                                        <th>Pending Transfers</th>
+                                        <th>Overall Status</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="dist-ops-monitoring-tbody">
+                                    <!-- Loaded by loadDistrictOperationsMonitoring() -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- NATIONAL ADMIN READ-ONLY DISTRICT & PHC MONITORING -->
+                <div id="ops-national-container" style="display:none;">
+                    <!-- Four compact summary cards for National Admin -->
+                    <div class="kpi-grid-4 margin-bottom-md">
+                        <div class="kpi-card highlight-blue">
+                            <div class="kpi-label">TOTAL DISTRICTS</div>
+                            <div class="kpi-value" id="nat-kpi-total-districts">--</div>
+                            <div class="kpi-subtext">Active operational districts</div>
+                        </div>
+                        <div class="kpi-card highlight-green">
+                            <div class="kpi-label">TOTAL PHCS</div>
+                            <div class="kpi-value" id="nat-kpi-total-phcs">--</div>
+                            <div class="kpi-subtext">Nationwide primary health centres</div>
+                        </div>
+                        <div class="kpi-card highlight-amber">
+                            <div class="kpi-label">PHCS REPORTING TODAY</div>
+                            <div class="kpi-value" id="nat-kpi-reporting-today">--</div>
+                            <div class="kpi-subtext">Online telemetry compliance</div>
+                        </div>
+                        <div class="kpi-card highlight-red">
+                            <div class="kpi-label">CRITICAL OPERATIONAL ISSUES</div>
+                            <div class="kpi-value" id="nat-kpi-critical-issues">--</div>
+                            <div class="kpi-subtext">Deficits, escalations & stale feeds</div>
+                        </div>
+                    </div>
+
+                    <!-- National District Summary Table View -->
+                    <div id="nat-district-summary-view" class="content-card">
+                        <div class="card-header">
+                            <div>
+                                <h3 class="card-title">Nationwide District & Facility Monitoring Summary</h3>
+                                <span class="card-tag">Consolidated Cross-District Overview (Read-Only)</span>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline" onclick="loadNationalOperationsMonitoring()">🔄 Refresh All</button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="meridian-table" id="nat-ops-monitoring-table">
+                                <thead>
+                                    <tr>
+                                        <th>District Name</th>
+                                        <th>Total PHCs</th>
+                                        <th>PHCs Reporting</th>
+                                        <th>Stale or Missing PHCs</th>
+                                        <th>Medicine Shortages</th>
+                                        <th>Bed Availability</th>
+                                        <th>Attendance Compliance</th>
+                                        <th>Active Transfers</th>
+                                        <th>Average Response Time</th>
+                                        <th>Overall Status</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="nat-ops-monitoring-tbody">
+                                    <!-- Loaded by loadNationalOperationsMonitoring() -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- National -> District Drilldown Section (Initially Hidden) -->
+                    <div id="nat-district-drilldown-container" style="display:none;" class="margin-top-md">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                            <button type="button" class="btn btn-sm btn-outline" onclick="closeNationalDistrictDrilldown()">
+                                ← Back to All Districts
+                            </button>
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <span style="font-size:0.85rem; color:#64748B;">Drilldown District:</span>
+                                <span class="badge-status info" id="nat-drilldown-district-name">District Name</span>
+                            </div>
+                        </div>
+
+                        <!-- 4 Compact Drilldown Summary Cards -->
+                        <div class="kpi-grid-4 margin-bottom-md">
+                            <div class="kpi-card highlight-blue">
+                                <div class="kpi-label">TOTAL PHCS</div>
+                                <div class="kpi-value" id="nat-drilldown-total-phcs">--</div>
+                                <div class="kpi-subtext">Facilities in district</div>
+                            </div>
+                            <div class="kpi-card highlight-green">
+                                <div class="kpi-label">REPORTING TODAY</div>
+                                <div class="kpi-value" id="nat-drilldown-reporting-today">--</div>
+                                <div class="kpi-subtext">Active telemetry online</div>
+                            </div>
+                            <div class="kpi-card highlight-amber">
+                                <div class="kpi-label">PHCS REQUIRING ATTENTION</div>
+                                <div class="kpi-value" id="nat-drilldown-requiring-attention">--</div>
+                                <div class="kpi-subtext">Shortages or alerts</div>
+                            </div>
+                            <div class="kpi-card highlight-red">
+                                <div class="kpi-label">PENDING RESOURCE REQUESTS</div>
+                                <div class="kpi-value" id="nat-drilldown-pending-requests">--</div>
+                                <div class="kpi-subtext">Active transfer needs</div>
+                            </div>
+                        </div>
+
+                        <div class="content-card">
+                            <div class="card-header">
+                                <div>
+                                    <h3 class="card-title" id="nat-drilldown-card-title">District Primary Health Centres</h3>
+                                    <span class="card-tag">Assigned District Facility Roster (Read-Only)</span>
+                                </div>
+                                <button type="button" class="btn btn-sm btn-outline" onclick="refreshNationalDistrictDrilldown()">🔄 Refresh District PHCs</button>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="meridian-table" id="nat-drilldown-table">
+                                    <thead>
+                                        <tr>
+                                            <th>PHC Name</th>
+                                            <th>Last Data Update</th>
+                                            <th>Reporting Status</th>
+                                            <th>Medicine-Stock Status</th>
+                                            <th>Available / Occupied Beds</th>
+                                            <th>Staff Attendance</th>
+                                            <th>Patient Footfall Today</th>
+                                            <th>Active Alerts</th>
+                                            <th>Pending Transfers</th>
+                                            <th>Overall Status</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="nat-drilldown-tbody">
+                                        <!-- Loaded dynamically -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
                 </section>
 
 
@@ -862,13 +1114,31 @@
                         </div>
                     </div>
 
-                    <!-- Sub-Navigation: Communication vs Analytical Reports -->
-                    <div class="sub-nav-bar">
+                    <!-- Sub-Navigation: Communication & Reports Secondary Tabs -->
+                    <div class="sub-nav-bar" id="comm-sub-nav-bar">
                         <button type="button" class="sub-nav-btn active" id="subnav-messages" onclick="switchCommSubTab('messages')">
                             <span>📬 Directives & Notices</span>
                         </button>
                         <button type="button" class="sub-nav-btn" id="subnav-reports" onclick="switchCommSubTab('reports')">
-                            <span>📊 Compliance & Turnaround Reports</span>
+                            <span id="subnav-reports-label">📊 Reports</span>
+                        </button>
+                        <button type="button" class="sub-nav-btn" id="subnav-aimodel" onclick="switchCommSubTab('aimodel')" style="display:none;">
+                            <span>🧠 AI Model & Privacy</span>
+                        </button>
+                        <button type="button" class="sub-nav-btn" id="subnav-security" onclick="switchCommSubTab('security')" style="display:none;">
+                            <span>🛡️ Security & System Admin</span>
+                        </button>
+                        <button type="button" class="sub-nav-btn" id="subnav-integrations" onclick="switchCommSubTab('integrations')" style="display:none;">
+                            <span>🔌 Integrations</span>
+                        </button>
+                        <button type="button" class="sub-nav-btn" id="subnav-audit" onclick="switchCommSubTab('audit')" style="display:none;">
+                            <span>📜 Audit Logs</span>
+                        </button>
+                        <button type="button" class="sub-nav-btn" id="subnav-acknowledgements" onclick="switchCommSubTab('acknowledgements')" style="display:none;">
+                            <span>✍️ Replies & Acknowledgements</span>
+                        </button>
+                        <button type="button" class="sub-nav-btn" id="subnav-activity" onclick="switchCommSubTab('activity')" style="display:none;">
+                            <span>📈 PHC Activity</span>
                         </button>
                     </div>
 
@@ -960,6 +1230,271 @@
                                 <p style="font-size:0.85rem; color:#475569; flex:1;">Download complete district compliance, inventory par balances, and audit records in standardized CSV format for external review:</p>
                                 <button type="button" class="btn btn-outline" onclick="exportReport('district_summary')">📥 Export District Summary (CSV)</button>
                                 <button type="button" class="btn btn-outline" onclick="exportReport('inventory_audit')">📥 Export Inventory Ledger (CSV)</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SUB-TAB 3: AI MODEL & PRIVACY (NATIONAL ADMIN ONLY) -->
+                    <div id="commtab-aimodel" class="comm-subtab-content" style="display:none;">
+                        <div class="content-card">
+                            <div class="card-header">
+                                <div>
+                                    <h3 class="card-title">Federated Learning & Demand Forecasting Model Command</h3>
+                                    <span class="card-tag">National Decentralized Aggregator</span>
+                                </div>
+                                <div style="display:flex; gap:8px;">
+                                    <button type="button" class="btn btn-primary" onclick="openFederatedConfirmModal()">⚡ Run Federated Model Update</button>
+                                    <button type="button" class="btn btn-outline" onclick="runModelEvaluation()">🔬 Evaluate Forecast Model</button>
+                                </div>
+                            </div>
+
+                            <!-- Federated Model Summary Grid -->
+                            <div class="kpi-grid-4 margin-bottom-md">
+                                <div class="kpi-card">
+                                    <div class="kpi-label">ACTIVE MODEL VERSION</div>
+                                    <div class="kpi-value" id="fed-model-ver" style="font-size:1.4rem;">v2.4-FedAvg</div>
+                                    <div class="kpi-subtext" id="fed-model-status">APPROVED_ACTIVE</div>
+                                </div>
+                                <div class="kpi-card highlight-green">
+                                    <div class="kpi-label">PARTICIPATING PHCS</div>
+                                    <div class="kpi-value" id="fed-participating-count">3</div>
+                                    <div class="kpi-subtext">PHC 1, 2, & 3 Contributing</div>
+                                </div>
+                                <div class="kpi-card highlight-blue">
+                                    <div class="kpi-label">EVALUATION ACCURACY</div>
+                                    <div class="kpi-value" id="fed-eval-accuracy">91.8%</div>
+                                    <div class="kpi-subtext">MAE = 2.14 units • RMSE = 2.68</div>
+                                </div>
+                                <div class="kpi-card">
+                                    <div class="kpi-label">RAW RECORDS SHARED</div>
+                                    <div class="kpi-value" style="color:var(--accent-emerald);">NO (0)</div>
+                                    <div class="kpi-subtext">Weights only transmitted</div>
+                                </div>
+                            </div>
+
+                            <!-- Model Summary Details -->
+                            <div style="background:#F8FAFC; border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:16px; margin-bottom:14px;">
+                                <div style="font-size:0.85rem; font-weight:700; color:var(--text-primary); margin-bottom:6px;">Decentralized Privacy Architecture</div>
+                                <p style="font-size:0.8rem; color:var(--text-secondary); line-height:1.5; margin:0;" id="fed-privacy-explanation">
+                                    Participating PHCs train local forecasting models using their own operational data. Raw PHC records remain within their authorised scope. Only permitted model updates are sent for aggregation into a shared forecasting model.
+                                </p>
+                            </div>
+
+                            <!-- Evaluation Backtest Result Container -->
+                            <div id="fed-evaluation-result-box" style="display:none; background:#F0FDF4; border:1px solid #BBF7D0; border-radius:var(--radius-sm); padding:16px; margin-bottom:14px;">
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                                    <span style="font-weight:700; color:#166534; font-size:0.9rem;">Model Backtest Evaluation Complete</span>
+                                    <span class="ai-badge" id="eval-status-badge" style="background:#DCFCE7; color:#166534;">IMPROVED</span>
+                                </div>
+                                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:10px; margin-top:8px;">
+                                    <div><span style="font-size:0.75rem; color:#475569;">Window:</span> <strong id="eval-window-text">30 Days</strong></div>
+                                    <div><span style="font-size:0.75rem; color:#475569;">MAE:</span> <strong id="eval-mae-text">2.14 units</strong></div>
+                                    <div><span style="font-size:0.75rem; color:#475569;">RMSE:</span> <strong id="eval-rmse-text">2.68 units</strong></div>
+                                    <div><span style="font-size:0.75rem; color:#475569;">Comparison:</span> <strong id="eval-comparison-text">Improved</strong></div>
+                                </div>
+                            </div>
+
+                            <!-- Collapsed Technical Details Accordion -->
+                            <div class="meridian-accordion" id="fed-tech-accordion">
+                                <div class="accordion-header" onclick="toggleAccordion('fed-tech-body', 'fed-tech-arrow')">
+                                    <span>⚙️ Technical Details (Weights, Coefficients & Mathematical Proofs)</span>
+                                    <span id="fed-tech-arrow">▼ Click to Expand</span>
+                                </div>
+                                <div class="accordion-body" id="fed-tech-body" style="display:none;">
+                                    <div style="margin-bottom:10px;">
+                                        <span class="ai-badge source">Federated Learning Demonstration</span>
+                                        <span style="font-size:0.75rem; color:var(--text-muted); margin-left:8px;">Decentralized NumPy regression demonstration</span>
+                                    </div>
+                                    <div style="font-family:var(--font-mono); font-size:0.75rem; background:#F8FAFC; padding:12px; border-radius:4px; border:1px solid #E2E8F0; margin-bottom:10px;">
+                                        <div><strong>Global Linear Model Equation:</strong> <span id="tech-global-eq">y = 1.8421 * x + 14.6528</span></div>
+                                        <div><strong>Aggregation Method:</strong> Sample-Weighted FedAvg: w_i = n_i / Total_N</div>
+                                        <div style="margin-top:6px; color:#475569;"><strong>MAE Definition:</strong> Mean Absolute Error measures the average magnitude of prediction errors in daily unit demand.</div>
+                                        <div style="color:#475569;"><strong>RMSE Definition:</strong> Root Mean Square Error squares errors before averaging, penalizing large unexpected surges more severely.</div>
+                                    </div>
+                                    <div id="tech-nodes-breakdown" style="font-size:0.75rem;">
+                                        <!-- Node coefficients injected by loadFederatedModelStatus() -->
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Model Update History Table -->
+                            <div class="margin-top-md">
+                                <h4 style="font-size:0.85rem; font-weight:700; margin-bottom:8px; color:#334155;">Model Version & Aggregation History</h4>
+                                <div class="table-responsive">
+                                    <table class="meridian-table" id="fed-history-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Version</th>
+                                                <th>Algorithm</th>
+                                                <th>Contributing Nodes</th>
+                                                <th>Aggregation Method</th>
+                                                <th>MAE / RMSE</th>
+                                                <th>Status</th>
+                                                <th>Updated At</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="fed-history-tbody">
+                                            <!-- Loaded dynamically -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SUB-TAB 4: SECURITY & SYSTEM ADMINISTRATION (NATIONAL ADMIN ONLY) -->
+                    <div id="commtab-security" class="comm-subtab-content" style="display:none;">
+                        <div class="content-card">
+                            <div class="card-header">
+                                <div>
+                                    <h3 class="card-title">Security & System Administration Telemetry</h3>
+                                    <span class="card-tag">Read-Only Cryptographic & RBAC Verification</span>
+                                </div>
+                                <button type="button" class="btn btn-sm btn-outline" onclick="loadSecurityMonitoringStatus()">🔄 Run Security Check</button>
+                            </div>
+
+                            <!-- Security Warning Banner (if any) -->
+                            <div style="background:#ECFDF5; border:1px solid #A7F3D0; border-radius:var(--radius-sm); padding:12px 16px; margin-bottom:14px; display:flex; align-items:center; gap:10px;">
+                                <span style="font-size:1.2rem;">🛡️</span>
+                                <div>
+                                    <span style="font-weight:700; color:#065F46; font-size:0.85rem;">All Security Subsystems Operational</span>
+                                    <div style="font-size:0.75rem; color:#047857;">Zero secrets exposed. Encryption keys, passwords, hashes, and session tokens remain strictly secured inside protected server vaults.</div>
+                                </div>
+                            </div>
+
+                            <!-- Security Telemetry Tiles -->
+                            <div class="security-status-grid" id="security-telemetry-grid">
+                                <!-- Populated dynamically by loadSecurityMonitoringStatus() -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SUB-TAB 5: INTEGRATIONS (FHIR EXPORT) (NATIONAL ADMIN ONLY) -->
+                    <div id="commtab-integrations" class="comm-subtab-content" style="display:none;">
+                        <div class="content-card">
+                            <div class="card-header">
+                                <div>
+                                    <h3 class="card-title">Standards-Compatible Interoperability & Data Export</h3>
+                                    <span class="card-tag">HL7 FHIR R4 Specification</span>
+                                </div>
+                                <span class="ai-badge source">FHIR-Compatible Demo Export</span>
+                            </div>
+
+                            <div style="background:#F8FAFC; border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:16px; margin-bottom:16px;">
+                                <h4 style="font-size:0.85rem; font-weight:700; margin-bottom:6px;">Export Standards-Compatible Data</h4>
+                                <p style="font-size:0.8rem; color:var(--text-secondary); line-height:1.45; margin-bottom:12px;">
+                                    Generate interoperable HL7 FHIR R4 resource bundles containing <code>MedicationStatement</code> and <code>Location</code> entities. Exports strictly enforce authorized data scopes and exclude sensitive PII.
+                                </p>
+                                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:12px; margin-bottom:14px;">
+                                    <div>
+                                        <label for="fhir-format-select" style="font-size:0.75rem; font-weight:600; display:block; margin-bottom:4px;">Export Format:</label>
+                                        <select id="fhir-format-select" class="login-input">
+                                            <option value="json">HL7 FHIR R4 Bundle (JSON)</option>
+                                            <option value="ndjson">FHIR Bulk Data (NDJSON)</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label for="fhir-scope-select" style="font-size:0.75rem; font-weight:600; display:block; margin-bottom:4px;">Jurisdictional Scope:</label>
+                                        <select id="fhir-scope-select" class="login-input">
+                                            <option value="NATIONAL">Nationwide (All Districts)</option>
+                                            <option value="DIST-NORTH">District North Only</option>
+                                            <option value="DIST-SOUTH">District South Only</option>
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label for="fhir-date-from" style="font-size:0.75rem; font-weight:600; display:block; margin-bottom:4px;">Date Range (From):</label>
+                                        <input type="date" id="fhir-date-from" class="login-input">
+                                    </div>
+                                    <div>
+                                        <label for="fhir-date-to" style="font-size:0.75rem; font-weight:600; display:block; margin-bottom:4px;">Date Range (To):</label>
+                                        <input type="date" id="fhir-date-to" class="login-input">
+                                    </div>
+                                </div>
+                                <div style="display:flex; justify-content:space-between; align-items:center;">
+                                    <span style="font-size:0.75rem; color:var(--text-muted);">Resource Types: MedicationStatement, Location • Demo Export</span>
+                                    <button type="button" class="btn btn-primary" onclick="downloadFhirExport()">📥 Download FHIR Bundle</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SUB-TAB 6: AUDIT LOGS LEDGER -->
+                    <div id="commtab-audit" class="comm-subtab-content" style="display:none;">
+                        <div class="content-card">
+                            <div class="card-header">
+                                <h3 class="card-title">System Audit & Compliance Ledger</h3>
+                                <button type="button" class="btn btn-sm btn-outline" onclick="loadEmbeddedAuditLogs()">🔄 Refresh Audit Trail</button>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="meridian-table" id="comm-audit-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Timestamp</th>
+                                            <th>User</th>
+                                            <th>Role</th>
+                                            <th>Action</th>
+                                            <th>Target</th>
+                                            <th>Result</th>
+                                            <th>Reason / Details</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="comm-audit-tbody">
+                                        <!-- Loaded dynamically -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SUB-TAB 7: REPLIES & ACKNOWLEDGEMENTS (PHC STAFF) -->
+                    <div id="commtab-acknowledgements" class="comm-subtab-content" style="display:none;">
+                        <div class="content-card">
+                            <div class="card-header">
+                                <h3 class="card-title">Signed Directives & Compliance Acknowledgements</h3>
+                                <span class="card-tag">Facility Accountability Log</span>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="meridian-table" id="comm-ack-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Directive Subject</th>
+                                            <th>Issuer</th>
+                                            <th>Received At</th>
+                                            <th>Acknowledged At</th>
+                                            <th>Signing Notes</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="comm-ack-tbody">
+                                        <!-- Loaded dynamically -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SUB-TAB 8: PHC ACTIVITY STREAM -->
+                    <div id="commtab-activity" class="comm-subtab-content" style="display:none;">
+                        <div class="content-card">
+                            <div class="card-header">
+                                <h3 class="card-title">Facility Operational Activity Stream</h3>
+                                <span class="card-tag">Recent Real-Time Events</span>
+                            </div>
+                            <div class="table-responsive">
+                                <table class="meridian-table" id="comm-activity-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Time</th>
+                                            <th>Event Category</th>
+                                            <th>Facility</th>
+                                            <th>Details</th>
+                                            <th>Operator</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="comm-activity-tbody">
+                                        <!-- Loaded dynamically -->
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
                     </div>
@@ -1279,6 +1814,146 @@
     </div>
 
 
+    <!-- 5B. READ-ONLY PHC MONITORING DETAIL MODAL -->
+    <div id="phc-monitoring-detail-modal" class="meridian-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="phc-detail-modal-title">
+        <div class="meridian-modal-content" style="max-width:920px; max-height:90vh; overflow-y:auto;">
+            <div class="meridian-modal-header" style="position:sticky; top:0; background:#FFFFFF; z-index:10;">
+                <div>
+                    <div class="meridian-modal-title" id="phc-detail-modal-title">
+                        <span>🏥</span> <span id="modal-phc-name-title">Primary Health Centre Telemetry</span>
+                    </div>
+                    <div style="font-size:0.775rem; color:#64748B; margin-top:2px;" id="modal-phc-meta-subtitle">
+                        Assigned District Facility Roster • Read-Only Telemetry
+                    </div>
+                </div>
+                <button type="button" class="meridian-modal-close" aria-label="Close" onclick="closePHCDetailsModal()">×</button>
+            </div>
+            <div class="meridian-modal-body" style="padding-top:12px;">
+                <!-- Telemetry Header Status Bar -->
+                <div style="background:#F8FAFC; border:1px solid #E2E8F0; border-radius:8px; padding:12px 16px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+                    <div>
+                        <div style="font-size:0.75rem; font-weight:700; color:#64748B; text-transform:uppercase;">Facility Location & Tier</div>
+                        <div style="font-size:0.9rem; font-weight:700; color:#0F172A;" id="modal-phc-location">Connaught Place, New Delhi (DIST-NORTH)</div>
+                    </div>
+                    <div>
+                        <div style="font-size:0.75rem; font-weight:700; color:#64748B; text-transform:uppercase;">Last Data Submission</div>
+                        <div style="font-size:0.9rem; font-weight:700; color:#0F172A;" id="modal-phc-last-sync">Today 16:30</div>
+                    </div>
+                    <div id="modal-phc-badges-bar" style="display:flex; gap:6px;">
+                        <span class="badge-status normal" id="modal-phc-rep-badge">Reporting Online</span>
+                        <span class="badge-status normal" id="modal-phc-overall-badge">Normal</span>
+                    </div>
+                </div>
+
+                <!-- 1. Medicine Stock Reserves & Shortage Alerts -->
+                <div class="margin-bottom-md">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <h4 style="font-size:0.9rem; font-weight:700; color:#0F172A;">💊 Medicine Inventory & Stock Reserves</h4>
+                        <span class="card-tag" id="modal-phc-stockout-tag">All Stock Safe</span>
+                    </div>
+                    <div class="table-responsive" style="max-height:220px; border:1px solid #E2E8F0; border-radius:6px;">
+                        <table class="meridian-table" id="modal-phc-inventory-table">
+                            <thead>
+                                <tr>
+                                    <th>Medicine Name</th>
+                                    <th>Current Stock</th>
+                                    <th>Safe Par Level</th>
+                                    <th>Stock Ratio</th>
+                                    <th>3-Day Linear Forecast</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="modal-phc-inventory-tbody">
+                                <!-- Populated dynamically -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 2. Beds & Equipment Grid -->
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
+                    <!-- Beds -->
+                    <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:8px; padding:14px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <h4 style="font-size:0.85rem; font-weight:700; color:#0F172A;">🛏️ Bed Capacity & Ward Status</h4>
+                            <span class="badge-status normal" id="modal-phc-bed-occ-tag">Occupancy: --%</span>
+                        </div>
+                        <div style="display:flex; justify-content:space-around; text-align:center; padding:8px 0; background:#F8FAFC; border-radius:6px; margin-bottom:8px;">
+                            <div>
+                                <div style="font-size:1.4rem; font-weight:800; color:#0F172A;" id="modal-phc-total-beds">--</div>
+                                <div style="font-size:0.7rem; color:#64748B;">Total Beds</div>
+                            </div>
+                            <div>
+                                <div style="font-size:1.4rem; font-weight:800; color:#DC2626;" id="modal-phc-occ-beds">--</div>
+                                <div style="font-size:0.7rem; color:#64748B;">Occupied Beds</div>
+                            </div>
+                            <div>
+                                <div style="font-size:1.4rem; font-weight:800; color:#16A34A;" id="modal-phc-avail-beds">--</div>
+                                <div style="font-size:0.7rem; color:#64748B;">Available Beds</div>
+                            </div>
+                        </div>
+                        <div style="font-size:0.75rem; color:#64748B;" id="modal-phc-bed-notes">Ward Notes: Standard inpatient allocation</div>
+                    </div>
+
+                    <!-- Equipment -->
+                    <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:8px; padding:14px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <h4 style="font-size:0.85rem; font-weight:700; color:#0F172A;">⚙️ Critical Equipment Readiness</h4>
+                            <span class="badge-status normal" id="modal-phc-equip-tag">All Operational</span>
+                        </div>
+                        <div id="modal-phc-equip-list" style="max-height:130px; overflow-y:auto; font-size:0.8rem;">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. Staff Attendance & Patient Footfall Grid -->
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;">
+                    <!-- Staff Attendance -->
+                    <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:8px; padding:14px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <h4 style="font-size:0.85rem; font-weight:700; color:#0F172A;">🧑‍⚕️ Staff Attendance Roster</h4>
+                            <span class="badge-status normal" id="modal-phc-staff-count-tag">-- Present</span>
+                        </div>
+                        <div id="modal-phc-staff-list" style="max-height:140px; overflow-y:auto; font-size:0.8rem;">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Patient Footfall -->
+                    <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:8px; padding:14px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <h4 style="font-size:0.85rem; font-weight:700; color:#0F172A;">📈 Patient Footfall & Triage</h4>
+                            <span class="card-tag" id="modal-phc-footfall-total-tag">Today: -- OPD</span>
+                        </div>
+                        <div style="background:#F8FAFC; border-radius:6px; padding:10px; margin-bottom:8px; font-size:0.8rem;" id="modal-phc-footfall-demographics">
+                            <!-- Populated dynamically -->
+                        </div>
+                        <div style="font-size:0.75rem; color:#64748B;" id="modal-phc-footfall-history-note">
+                            Weekly volume pattern feeds linear demand forecasting engine.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4. Active Resource Requests & Alerts -->
+                <div style="background:#FFFFFF; border:1px solid #E2E8F0; border-radius:8px; padding:14px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <h4 style="font-size:0.85rem; font-weight:700; color:#0F172A;">⚡ Active Resource Requests & Transfers</h4>
+                        <span class="card-tag" id="modal-phc-transfers-count-tag">0 Active Transfers</span>
+                    </div>
+                    <div id="modal-phc-transfers-list" style="font-size:0.8rem;">
+                        <!-- Populated dynamically -->
+                    </div>
+                </div>
+            </div>
+            <div class="meridian-modal-footer" style="position:sticky; bottom:0; background:#FFFFFF; z-index:10; border-top:1px solid #E2E8F0; display:flex; justify-content:space-between; align-items:center;">
+                <span style="font-size:0.75rem; color:#64748B;">🔒 Read-Only Surveillance View — Operational data entry restricted to assigned facility staff.</span>
+                <button type="button" class="btn btn-outline" onclick="closePHCDetailsModal()">Close Surveillance View</button>
+            </div>
+        </div>
+    </div>
+
+
     <!-- 6. ADMINISTRATIVE OVERRIDE MODAL -->
     <div id="admin-override-modal" class="meridian-modal-overlay">
         <div class="meridian-modal-content">
@@ -1522,6 +2197,125 @@
         </div>
     </div>
 
-    <script src="/static/app.js?v=2026.4"></script>
+    <!-- 13. MEDICINE BATCH PROVENANCE MODAL -->
+    <div id="provenance-modal" class="meridian-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="prov-modal-title">
+        <div class="meridian-modal-content" style="max-width:700px;">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title" id="prov-modal-title">
+                    <span>📦</span> Medicine Batch Provenance Ledger
+                </div>
+                <button type="button" class="meridian-modal-close" onclick="closeProvenanceModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+                    <div>
+                        <h3 id="prov-med-name" style="font-size:1.15rem; font-weight:700; color:var(--text-primary); margin:0;">Loading...</h3>
+                        <div style="font-family:var(--font-mono); font-size:0.8rem; color:var(--text-muted); margin-top:2px;">
+                            Batch ID: <strong id="prov-batch-id" style="color:var(--text-primary);">--</strong>
+                        </div>
+                    </div>
+                    <span class="ai-badge" id="prov-status-badge" style="background:#DCFCE7; color:#166534; font-size:0.75rem;">VERIFIED_AUTHENTIC</span>
+                </div>
+
+                <!-- Provenance Spec Table -->
+                <div style="background:#F8FAFC; border:1px solid var(--border-color); border-radius:var(--radius-sm); padding:14px; margin-bottom:14px;">
+                    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:10px; font-size:0.8rem;">
+                        <div><span style="color:var(--text-muted);">Supplier / Source:</span> <strong id="prov-supplier">--</strong></div>
+                        <div><span style="color:var(--text-muted);">Manufacturing Date:</span> <strong id="prov-mfg-date">--</strong></div>
+                        <div><span style="color:var(--text-muted);">Expiry Date:</span> <strong id="prov-exp-date">--</strong></div>
+                        <div><span style="color:var(--text-muted);">Received Date:</span> <strong id="prov-rx-date">--</strong></div>
+                        <div><span style="color:var(--text-muted);">Original Quantity:</span> <strong id="prov-orig-qty">--</strong></div>
+                        <div><span style="color:var(--text-muted);">Current Remaining:</span> <strong id="prov-rem-qty">--</strong></div>
+                        <div><span style="color:var(--text-muted);">Current Location:</span> <strong id="prov-curr-phc">--</strong></div>
+                        <div><span style="color:var(--text-muted);">Ledger Checksum:</span> <code id="prov-checksum" style="font-size:0.7rem; background:#E2E8F0; padding:2px 4px; border-radius:3px;">--</code></div>
+                    </div>
+                </div>
+
+                <!-- Immutable Stock Transactions -->
+                <div>
+                    <h4 style="font-size:0.85rem; font-weight:700; margin-bottom:8px; color:#334155;">Stock Transaction History (Database Audit Trail)</h4>
+                    <div class="provenance-timeline" id="prov-timeline-container">
+                        <!-- Populated dynamically by openBatchProvenanceModal() -->
+                    </div>
+                </div>
+
+                <!-- Transfer History -->
+                <div id="prov-transfer-section" style="margin-top:14px; display:none;">
+                    <h4 style="font-size:0.85rem; font-weight:700; margin-bottom:8px; color:#334155;">Inter-Facility Transfer Custody</h4>
+                    <div class="table-responsive">
+                        <table class="meridian-table" style="font-size:0.75rem;" id="prov-transfers-table">
+                            <thead>
+                                <tr>
+                                    <th>Transfer ID</th>
+                                    <th>Source</th>
+                                    <th>Target</th>
+                                    <th>Quantity</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="prov-transfers-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            <div class="meridian-modal-footer">
+                <span style="font-size:0.72rem; color:var(--text-muted); margin-right:auto;">Database-Backed Provenance Ledger</span>
+                <button type="button" class="btn btn-outline" onclick="closeProvenanceModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 14. RUN FEDERATED MODEL UPDATE CONFIRMATION MODAL -->
+    <div id="fed-confirm-modal" class="meridian-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="fed-modal-title">
+        <div class="meridian-modal-content">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title" id="fed-modal-title">
+                    <span>⚡</span> Confirm Federated Model Update
+                </div>
+                <button type="button" class="meridian-modal-close" onclick="closeFederatedConfirmModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <p style="font-size:0.85rem; color:#475569; margin-bottom:12px;">
+                    You are about to execute a central federated aggregation pass across participating facility nodes (PHC-001, PHC-002, PHC-003).
+                </p>
+                <div style="background:#F0FDF4; border:1px solid #BBF7D0; border-radius:var(--radius-sm); padding:12px; font-size:0.8rem; color:#166534; margin-bottom:14px;">
+                    <strong>Privacy Guarantee:</strong> Raw patient records and operational data remain strictly on local nodes. Only local model weight vectors [slope, intercept] and sample counts are transmitted for weighted FedAvg aggregation.
+                </div>
+                <div class="form-group">
+                    <label for="fed-update-notes">Aggregation Reason / Audit Notes:</label>
+                    <input type="text" id="fed-update-notes" class="login-input" value="Scheduled national federated model aggregation pass" required>
+                </div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-outline" onclick="closeFederatedConfirmModal()">Cancel</button>
+                <button type="button" id="btn-execute-fed-update" class="btn btn-primary" onclick="confirmExecuteFederatedUpdate()">
+                    <span id="fed-btn-spinner" style="display:none;">⏳</span>
+                    <span id="fed-btn-text">Execute Model Update</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 15. NATIONAL ALL INSIGHTS MODAL -->
+    <div id="all-insights-modal" class="meridian-modal-overlay" role="dialog" aria-modal="true" aria-labelledby="all-insights-title">
+        <div class="meridian-modal-content" style="max-width:750px;">
+            <div class="meridian-modal-header">
+                <div class="meridian-modal-title" id="all-insights-title">
+                    <span>🌐</span> Comprehensive National Supply Chain AI Insights
+                </div>
+                <button type="button" class="meridian-modal-close" onclick="closeAllInsightsModal()">×</button>
+            </div>
+            <div class="meridian-modal-body">
+                <div id="all-insights-body-content" style="font-size:0.85rem;">
+                    <!-- Loaded dynamically -->
+                </div>
+            </div>
+            <div class="meridian-modal-footer">
+                <button type="button" class="btn btn-primary" onclick="closeAllInsightsModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js?v=2026.5"></script>
 </body>
 </html>

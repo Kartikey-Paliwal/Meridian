@@ -19,3 +19,5 @@ secret.key
 .DS_Store
 Thumbs.db
 *.log
+.env
+scratch/

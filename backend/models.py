@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, EmailStr
+from pydantic import BaseModel, Field, EmailStr, model_validator
 from typing import List, Optional, Dict, Any
 
 # ---------------------------------------------------------
@@ -209,6 +209,47 @@ class StockConsumedRequest(BaseModel):
 # Backward-compatible and semantic alias
 class StockDispensedRequest(StockConsumedRequest):
     pass
+
+
+# ---------------------------------------------------------
+# FEDERATED LEARNING & EVALUATION SCHEMAS
+# ---------------------------------------------------------
+
+class FederatedTrainRequest(BaseModel):
+    confirm: bool = Field(False, description="Explicit confirmation required to trigger federated aggregation")
+    horizon_days: int = Field(7, ge=1, le=30)
+    notes: Optional[str] = None
+
+class ModelEvaluationRequest(BaseModel):
+    model_version: Optional[str] = "v2.4-FedAvg"
+    test_days: Optional[int] = Field(None, ge=7, le=90, description="Evaluation window days requested by frontend/tests")
+    window_days: Optional[int] = Field(None, ge=7, le=90, description="Backward-compatible window days")
+
+    @model_validator(mode="before")
+    @classmethod
+    def reconcile_days(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            td = data.get("test_days")
+            wd = data.get("window_days")
+            if td is not None and wd is None:
+                data["window_days"] = td
+            elif wd is not None and td is None:
+                data["test_days"] = wd
+            elif td is None and wd is None:
+                data["window_days"] = 30
+                data["test_days"] = 30
+        return data
+
+    @property
+    def canonical_window_days(self) -> int:
+        return self.window_days or self.test_days or 30
+
+class FhirExportRequest(BaseModel):
+    format: str = Field("json", description="Export format: json or ndjson")
+    scope: str = Field("NATIONAL", description="Jurisdictional scope: NATIONAL or district ID")
+    date_from: Optional[str] = None
+    date_to: Optional[str] = None
+
 
 
 

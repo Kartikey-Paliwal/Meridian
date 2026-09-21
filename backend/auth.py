@@ -281,9 +281,17 @@ async def get_current_user(
 
 
 def require_roles(allowed_roles: List[str]):
-    """Role-hierarchy guard dependency."""
+    """Role-hierarchy guard dependency with normalized string matching."""
+    norm_allowed = set()
+    for r in allowed_roles:
+        norm_allowed.add(r)
+        norm_allowed.add(r.upper().replace(" ", "_"))
+        norm_allowed.add(r.title().replace("_", " "))
+
     async def role_checker(current_user: Dict[str, Any] = Depends(get_current_user)) -> Dict[str, Any]:
-        if current_user["role"] not in allowed_roles:
+        u_role = current_user.get("role", "")
+        u_norm = u_role.upper().replace(" ", "_")
+        if u_role not in norm_allowed and u_norm not in norm_allowed:
             log_audit_event(
                 user_id=current_user["id"],
                 user_name=current_user["full_name"],

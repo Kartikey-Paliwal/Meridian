@@ -296,6 +296,40 @@ def init_db():
     );
     """)
 
+    # 16. federated_models table (National aggregator model versioning)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS federated_models (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        version TEXT NOT NULL UNIQUE,
+        algorithm TEXT NOT NULL,
+        weights TEXT NOT NULL,
+        num_nodes INTEGER NOT NULL,
+        participating_nodes TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'APPROVED_ACTIVE',
+        aggregation_method TEXT NOT NULL DEFAULT 'WEIGHTED_FEDAVG',
+        evaluation_mae REAL,
+        evaluation_rmse REAL,
+        created_by TEXT,
+        created_at TEXT NOT NULL
+    );
+    """)
+
+    # 17. model_evaluations table (Backtesting and MAE/RMSE historical log)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS model_evaluations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        model_version TEXT NOT NULL,
+        evaluated_window_days INTEGER NOT NULL,
+        mae REAL NOT NULL,
+        rmse REAL NOT NULL,
+        accuracy_score_pct REAL,
+        status TEXT NOT NULL, -- 'IMPROVED', 'UNCHANGED', 'DECLINED'
+        details TEXT,
+        evaluated_by TEXT,
+        created_at TEXT NOT NULL
+    );
+    """)
+
     # -------------------------------------------------------------
     # Schema Migrations: ensure new columns exist in pre-existing DBs
     # -------------------------------------------------------------
@@ -420,6 +454,18 @@ def init_db():
     if cursor.fetchone()[0] == 0:
         seed_facility_equipment(cursor)
         conn.commit()
+
+    # Seed stock transactions independently
+    seed_stock_transactions(cursor)
+    conn.commit()
+
+    # Seed federated models independently
+    seed_federated_models(cursor)
+    conn.commit()
+
+    # Seed model evaluations independently
+    seed_model_evaluations(cursor)
+    conn.commit()
 
     conn.close()
 
@@ -875,3 +921,83 @@ def seed_initial_data(cursor):
                 sent_at, read_at, acknowledged_at, acknowledged_by, acknowledgement_notes
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, msg)
+
+def seed_stock_transactions(cursor):
+    """Seed sample stock transactions for Batch Provenance Ledger if missing."""
+    cursor.execute("SELECT COUNT(*) FROM stock_transactions WHERE batch_number = 'BATCH-ORS-2026-A1'")
+    if cursor.fetchone()[0] == 0:
+        seed_batches = [
+            # PHC-001 Batches
+            ("PHC-001", "DIST-NORTH", "ORS Packets", "RECEIVED", 200, "BATCH-ORS-2026-A1", "2028-01-15", "National Pharma Labs Ltd.", "Initial central state consignment receipt", "2026-01-25T09:15:00", "admin@meridian.health", "2026-01-25T09:15:00"),
+            ("PHC-001", "DIST-NORTH", "ORS Packets", "DISPENSED", 185, "BATCH-ORS-2026-A1", "2028-01-15", "National Pharma Labs Ltd.", "High paediatric OPD diarrhoeal distribution", "2026-02-10T14:30:00", "staff.alpha@meridian.health", "2026-02-10T14:30:00"),
+            ("PHC-001", "DIST-NORTH", "Paracetamol 500mg", "RECEIVED", 250, "BATCH-PCM-2026-P4", "2027-11-30", "Apex Pharmaceuticals Ltd.", "District medical store allotment", "2026-01-20T11:00:00", "admin@meridian.health", "2026-01-20T11:00:00"),
+            ("PHC-001", "DIST-NORTH", "Paracetamol 500mg", "DISPENSED", 225, "BATCH-PCM-2026-P4", "2027-11-30", "Apex Pharmaceuticals Ltd.", "Fever triage dispensary issues", "2026-02-18T16:20:00", "staff.alpha@meridian.health", "2026-02-18T16:20:00"),
+            ("PHC-001", "DIST-NORTH", "Amoxicillin 250mg", "RECEIVED", 150, "BATCH-AMX-2026-C2", "2027-08-31", "Central State Warehousing Corp", "Quarterly anti-infective allocation", "2026-01-18T10:00:00", "admin@meridian.health", "2026-01-18T10:00:00"),
+            ("PHC-001", "DIST-NORTH", "Amoxicillin 250mg", "DISPENSED", 30, "BATCH-AMX-2026-C2", "2027-08-31", "Central State Warehousing Corp", "General OPD prescriptions", "2026-02-05T12:00:00", "staff.alpha@meridian.health", "2026-02-05T12:00:00"),
+
+            # PHC-002 Batches (Surplus donor)
+            ("PHC-002", "DIST-NORTH", "ORS Packets", "RECEIVED", 400, "BATCH-ORS-2026-B8", "2028-04-10", "National Pharma Labs Ltd.", "Seasonal buffer allocation", "2026-01-22T10:30:00", "admin@meridian.health", "2026-01-22T10:30:00"),
+            ("PHC-002", "DIST-NORTH", "ORS Packets", "DISPENSED", 80, "BATCH-ORS-2026-B8", "2028-04-10", "National Pharma Labs Ltd.", "Routine community health worker issue", "2026-02-12T11:45:00", "staff.beta@meridian.health", "2026-02-12T11:45:00"),
+            ("PHC-002", "DIST-NORTH", "Paracetamol 500mg", "RECEIVED", 350, "BATCH-PCM-2026-P8", "2027-12-15", "Apex Pharmaceuticals Ltd.", "Standard district delivery", "2026-01-24T14:00:00", "admin@meridian.health", "2026-01-24T14:00:00"),
+            ("PHC-002", "DIST-NORTH", "Paracetamol 500mg", "DISPENSED", 70, "BATCH-PCM-2026-P8", "2027-12-15", "Apex Pharmaceuticals Ltd.", "Outpatient department dispensation", "2026-02-14T09:30:00", "staff.beta@meridian.health", "2026-02-14T09:30:00"),
+
+            # PHC-003 Batches
+            ("PHC-003", "DIST-SOUTH", "ORS Packets", "RECEIVED", 200, "BATCH-ORS-2026-S1", "2028-02-28", "National Pharma Labs Ltd.", "South district central dispatch", "2026-01-26T13:00:00", "admin@meridian.health", "2026-01-26T13:00:00"),
+            ("PHC-003", "DIST-SOUTH", "Paracetamol 500mg", "RECEIVED", 200, "BATCH-PCM-2026-S2", "2027-10-20", "Apex Pharmaceuticals Ltd.", "Standard supply", "2026-01-26T13:30:00", "admin@meridian.health", "2026-01-26T13:30:00")
+        ]
+        for b in seed_batches:
+            cursor.execute("""
+            INSERT INTO stock_transactions (
+                phc_id, district_id, medicine_name, transaction_type, quantity,
+                batch_number, expiry_date, supplier_source, notes, transaction_date, created_by, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, b)
+
+
+def seed_federated_models(cursor):
+    """Seed baseline federated model if table is empty."""
+    cursor.execute("SELECT COUNT(*) FROM federated_models")
+    if cursor.fetchone()[0] == 0:
+        today = datetime.now()
+        cursor.execute("""
+        INSERT INTO federated_models (
+            version, algorithm, weights, num_nodes, participating_nodes, status,
+            aggregation_method, evaluation_mae, evaluation_rmse, created_by, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            "v2.4-FedAvg",
+            "Federated Averaging (Weighted FedAvg)",
+            json.dumps([1.8421, 14.6528]),
+            3,
+            json.dumps(["PHC-001 (Alpha)", "PHC-002 (Beta)", "PHC-003 (Gamma)"]),
+            "APPROVED_ACTIVE",
+            "WEIGHTED_SAMPLE_FEDAVG",
+            2.14,
+            2.68,
+            "admin@meridian.health",
+            (today - timedelta(days=2)).isoformat()
+        ))
+
+
+def seed_model_evaluations(cursor):
+    """Seed initial model evaluation backtest log if table is empty."""
+    cursor.execute("SELECT COUNT(*) FROM model_evaluations")
+    if cursor.fetchone()[0] == 0:
+        today = datetime.now()
+        cursor.execute("""
+        INSERT INTO model_evaluations (
+            model_version, evaluated_window_days, mae, rmse, accuracy_score_pct, status, details, evaluated_by, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            "v2.4-FedAvg",
+            30,
+            2.14,
+            2.68,
+            91.8,
+            "IMPROVED",
+            "Evaluated against 30-day ground-truth daily consumption. MAE improved by 0.32 units compared to prior baseline.",
+            "admin@meridian.health",
+            (today - timedelta(days=2)).isoformat()
+        ))
+
+

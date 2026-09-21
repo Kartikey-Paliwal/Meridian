@@ -1,6 +1,6 @@
 import json
 import math
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from backend.forecasting import forecast_demand_linear_regression
 
 # PHC GIS Coordinates
@@ -37,13 +37,24 @@ def get_eta_minutes(source_phc: str, target_phc: str) -> int:
     # Average transfer speed 30 km/h in rural corridors -> 2 mins per km + 10 mins loading overhead
     return int(dist * 2 + 10)
 
-def generate_redistribution_recommendations(inventory_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def generate_redistribution_recommendations(inventory_data: Optional[List[Dict[str, Any]]] = None, district_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
-    Scans all PHC inventories.
+    Scans PHC inventories.
     Identifies shortage PHCs (days remaining <= 4.0 or stock < 30% par level)
     and pairs them with surplus donor PHCs (days remaining >= 8.0 or surplus stock > 100 units).
     Returns explainable recommendation objects with GIS & haulage cost analytics.
     """
+    if inventory_data is None:
+        from backend.database import get_db_connection
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        if district_id:
+            cursor.execute("SELECT * FROM medicine_inventory WHERE district_id = ?", (district_id,))
+        else:
+            cursor.execute("SELECT * FROM medicine_inventory")
+        inventory_data = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+
     by_medicine = {}
     for item in inventory_data:
         med = item["medicine_name"]
@@ -98,11 +109,18 @@ def generate_redistribution_recommendations(inventory_data: List[Dict[str, Any]]
                     recommendation = {
                         "source_phc": d_phc["phc_id"],
                         "target_phc": s_phc["phc_id"],
+                        "donor_phc_id": d_phc["phc_id"],
+                        "recipient_phc_id": s_phc["phc_id"],
+                        "donor_phc_name": d_phc["phc_id"],
+                        "recipient_phc_name": s_phc["phc_id"],
                         "source_district_id": src_district,
                         "target_district_id": tgt_district,
                         "is_inter_district": src_district != tgt_district,
                         "medicine_name": med_name,
                         "recommended_quantity": transfer_qty,
+                        "recommended_qty": transfer_qty,
+                        "donor_surplus": int(safe_donor_capacity),
+                        "donor_safe_buffer_retained": int(d_phc["quantity"] - transfer_qty),
                         "eta_minutes": eta,
                         "transport_cost_usd": cost,
                         "distance_km": dist_km,

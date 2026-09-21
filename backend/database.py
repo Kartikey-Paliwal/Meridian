@@ -6,7 +6,7 @@ import secrets
 from datetime import datetime, timedelta
 from backend.privacy import encrypt_field, tokenize_identifier
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "meridian.db")
+DB_PATH = os.getenv("MERIDIAN_DB_PATH", os.path.join(os.path.dirname(__file__), "meridian.db"))
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH, timeout=30.0)
@@ -411,6 +411,17 @@ def init_db():
 
     # Ensure unique index on facility_equipment for idempotent seeding
     cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_facility_equipment_phc_name ON facility_equipment (phc_id, name)")
+
+    # Performance Indexes for high-frequency filters
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_med_inv_phc ON medicine_inventory (phc_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_med_inv_district ON medicine_inventory (district_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_rt_status ON redistribution_transfers (status)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_rt_target ON redistribution_transfers (target_phc)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_rt_source ON redistribution_transfers (source_phc)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_msg_recip ON messages (recipient_id, recipient_role)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_stk_tx_batch ON stock_transactions (phc_id, batch_number)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_pt_footfall ON patient_footfall (phc_id, date)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_stf_att ON staff_attendance (phc_id, date)")
 
     # Backfill district_id in operational tables based on phc_id
     cursor.execute("UPDATE medicine_inventory SET district_id = 'DIST-NORTH' WHERE phc_id IN ('PHC-001', 'PHC-002') AND (district_id IS NULL OR district_id = '')")
@@ -857,6 +868,17 @@ def seed_initial_data(cursor):
                 "staff.alpha@meridian.health", yesterday_iso,
                 yesterday_iso, None, 0,
                 yesterday_iso, yesterday_iso
+            ),
+            # 4. Approved transfer awaiting physical dispatch
+            (
+                "PHC-002", "PHC-001", "DIST-NORTH", "DIST-NORTH",
+                "IV fluids (RL)", 20, 25, "NORMAL", "Approved",
+                json.dumps({"source_surplus": 100, "target_deficit": 40}),
+                "staff.alpha@meridian.health", (today - timedelta(hours=1, minutes=30)).isoformat(),
+                "officer.north@meridian.health", (today - timedelta(hours=1)).isoformat(),
+                "Approved emergency buffer allocation",
+                None, None, None, None, None, None, 0,
+                (today - timedelta(hours=1, minutes=30)).isoformat(), (today - timedelta(hours=1)).isoformat()
             )
         ]
         for tr in seed_transfers:
@@ -999,5 +1021,104 @@ def seed_model_evaluations(cursor):
             "admin@meridian.health",
             (today - timedelta(days=2)).isoformat()
         ))
+
+
+def reset_demo_data(caller_info=None, force=False):
+    """
+    Safely and idempotently resets only demo-owned records back to the predictable demonstration state.
+    Does NOT delete the database file.
+    Does NOT affect unrelated data.
+    Works only when DEMO_MODE=true (unless force=True via CLI).
+    Creates an audit log entry.
+    """
+    is_demo = os.environ.get("DEMO_MODE", "true").lower() in ("true", "1", "yes")
+    if not is_demo and not force:
+        raise PermissionError("Demo data reset is prohibited when DEMO_MODE is disabled.")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # 1. Reset medicine_inventory to baseline
+    cursor.execute("DELETE FROM medicine_inventory")
+    # 2. Reset bed_status to baseline
+    cursor.execute("DELETE FROM bed_status")
+    # 3. Reset patient_footfall to baseline
+    cursor.execute("DELETE FROM patient_footfall")
+    # 4. Reset redistribution_transfers to baseline
+    cursor.execute("DELETE FROM redistribution_transfers")
+    # 5. Reset messages to baseline
+    cursor.execute("DELETE FROM messages")
+    # 6. Reset stock_transactions to baseline
+    cursor.execute("DELETE FROM stock_transactions")
+    # 7. Reset staff_attendance to baseline
+    cursor.execute("DELETE FROM staff_attendance")
+    # 8. Reset facility_equipment to baseline
+    cursor.execute("DELETE FROM facility_equipment")
+    # 9. Reset federated_models & model_evaluations to baseline
+    cursor.execute("DELETE FROM federated_models")
+    cursor.execute("DELETE FROM model_evaluations")
+    conn.commit()
+
+    # Reseed everything in consistent order
+    seed_districts_and_phcs(cursor)
+    seed_users(cursor)
+    seed_staff_members(cursor)
+    seed_facility_equipment(cursor)
+    seed_initial_data(cursor)
+    seed_stock_transactions(cursor)
+    seed_federated_models(cursor)
+    seed_model_evaluations(cursor)
+    conn.commit()
+
+    # 10. Audit log entry
+    user_id = caller_info.get("id", "SYSTEM_CLI") if caller_info else "SYSTEM_CLI"
+    user_name = caller_info.get("full_name", "System Administrator (Demo Reset)") if caller_info else "System CLI / Demo Reset"
+    role = caller_info.get("role", "NATIONAL_ADMIN") if caller_info else "NATIONAL_ADMIN"
+
+    now_iso = datetime.now().isoformat()
+    cursor.execute("""
+    INSERT INTO audit_logs (
+        user_id, user_name, role, action, target_record, district_scope, phc_scope,
+        timestamp, result, reason, previous_value, new_value, details
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        user_id, user_name, role, "DEMO_DATA_RESET", "meridian_demo_dataset",
+        "NATIONWIDE", "ALL_FACILITIES", now_iso, "SUCCESS",
+        "Demonstration dataset reset to initial baseline state",
+        "modified_operational_state", "baseline_demonstration_state",
+        json.dumps({"reset_tables": [
+            "medicine_inventory", "bed_status", "patient_footfall",
+            "redistribution_transfers", "messages", "stock_transactions",
+            "staff_attendance", "facility_equipment", "federated_models", "model_evaluations"
+        ]})
+    ))
+    conn.commit()
+    conn.close()
+    return {"status": "success", "message": "Demonstration dataset restored to baseline state.", "timestamp": now_iso}
+
+
+if __name__ == "__main__":
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(description="Meridian Database Management & Demo Seeding CLI")
+    parser.add_argument("--init", action="store_true", help="Initialize database schema and seed baseline tables")
+    parser.add_argument("--reset", action="store_true", help="Reset demo data back to predictable initial state")
+    parser.add_argument("--force", action="store_true", help="Force reset even if DEMO_MODE is not true")
+
+    args = parser.parse_args()
+
+    if args.reset:
+        print("[*] Initiating Meridian demo dataset reset...")
+        try:
+            res = reset_demo_data(force=args.force)
+            print(f"[SUCCESS] {res['message']} (Timestamp: {res['timestamp']})")
+        except Exception as e:
+            print(f"[ERROR] Failed to reset demo data: {e}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        print("[*] Initializing Meridian database tables and baseline seeds...")
+        init_db()
+        print("[SUCCESS] Database initialized successfully.")
 
 

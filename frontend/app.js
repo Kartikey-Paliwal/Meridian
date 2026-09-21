@@ -248,10 +248,13 @@ async function checkDemoModeConfig() {
         if (res.ok) {
             const data = await res.json();
             const isDemo = data.demo_mode !== false;
+            window.isDemoMode = isDemo;
             const demoBox = document.getElementById("demo-access-box");
             const switchDemoBtn = document.getElementById("menu-switch-demo-btn");
+            const demoBadge = document.getElementById("demo-environment-badge");
             if (demoBox) demoBox.style.display = isDemo ? "block" : "none";
             if (switchDemoBtn) switchDemoBtn.style.display = isDemo ? "flex" : "none";
+            if (demoBadge) demoBadge.style.display = isDemo ? "inline-flex" : "none";
         }
     } catch (e) {}
 }
@@ -376,10 +379,15 @@ function initAuthenticatedSession(user) {
 
     // Demo Mode controls
     const isDemo = user.demo_mode !== false;
+    window.isDemoMode = isDemo;
     const switchDemoBtn = document.getElementById("menu-switch-demo-btn");
     const demoBox = document.getElementById("demo-access-box");
+    const demoBadge = document.getElementById("demo-environment-badge");
+    const demoResetBtn = document.getElementById("menu-demo-reset-btn");
     if (switchDemoBtn) switchDemoBtn.style.display = isDemo ? "flex" : "none";
     if (demoBox) demoBox.style.display = isDemo ? "block" : "none";
+    if (demoBadge) demoBadge.style.display = isDemo ? "inline-flex" : "none";
+    if (demoResetBtn) demoResetBtn.style.display = (isDemo && user.role === "NATIONAL_ADMIN") ? "flex" : "none";
 
     // Sidebar Scope Card
     const scopeName = document.getElementById("sidebar-scope-name");
@@ -4105,6 +4113,66 @@ function toggleAccordion(bodyId, arrowId) {
     body.style.display = isHidden ? "block" : "none";
     if (arrow) {
         arrow.innerText = isHidden ? "▲ Click to Collapse" : "▼ Click to Expand";
+    }
+}
+
+// --- 16. DEMO RESET MODAL & WORKFLOW ---
+
+function openDemoResetModal() {
+    const modal = document.getElementById("demo-reset-confirm-modal");
+    if (modal) modal.style.display = "flex";
+}
+
+function closeDemoResetModal() {
+    const modal = document.getElementById("demo-reset-confirm-modal");
+    if (modal) modal.style.display = "none";
+}
+
+async function executeDemoReset() {
+    const btn = document.getElementById("confirm-demo-reset-btn");
+    const spinner = document.getElementById("demo-reset-spinner");
+    const btnText = document.getElementById("demo-reset-btn-text");
+
+    if (btn) btn.disabled = true;
+    if (spinner) spinner.style.display = "inline-block";
+    if (btnText) btnText.innerText = "Restoring Baseline...";
+
+    try {
+        const res = await apiFetch("/api/admin/demo-reset", {
+            method: "POST",
+            body: JSON.stringify({ confirm: true })
+        });
+
+        if (res.ok) {
+            showToast("Demonstration dataset successfully restored to initial baseline!", "success");
+            closeDemoResetModal();
+            // Refresh current view data
+            if (activeMainTab === "dashboard") {
+                if (window.currentUser && window.currentUser.role === "NATIONAL_ADMIN") {
+                    loadNationalDashboard();
+                } else if (window.currentUser && window.currentUser.role === "DISTRICT_OFFICER") {
+                    loadDistrictDashboard();
+                } else {
+                    loadPHCDashboard(activePhcId);
+                }
+            } else if (activeMainTab === "operations") {
+                if (window.currentUser && window.currentUser.role === "NATIONAL_ADMIN") {
+                    loadNationalOperationsMonitoring();
+                } else if (window.currentUser && window.currentUser.role === "DISTRICT_OFFICER") {
+                    loadDistrictOperationsMonitoring();
+                } else {
+                    loadOperationsData(activePhcId);
+                }
+            }
+        } else {
+            showToast("Failed to reset demo dataset: " + (res.detail || "Server error"), "error");
+        }
+    } catch (err) {
+        showToast("Network error resetting demo dataset: " + err.message, "error");
+    } finally {
+        if (btn) btn.disabled = false;
+        if (spinner) spinner.style.display = "none";
+        if (btnText) btnText.innerText = "Reset to Baseline State";
     }
 }
 

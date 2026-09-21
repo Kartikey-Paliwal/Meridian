@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 
-from backend.database import get_db_connection, init_db, hash_password, verify_password, get_phc_gis_data
+from backend.database import get_db_connection, init_db, hash_password, verify_password, get_phc_gis_data, reset_demo_data
 from backend.models import (
     LoginRequest, ChangePasswordRequest, ForgotPasswordRequest, ResetPasswordRequest,
     CreateUserRequest, UpdateUserStatusRequest, AdminOverrideRequest,
@@ -19,7 +19,7 @@ from backend.models import (
     TransferCreateRequest, TransferReviewRequest, TransferDispatchConfirmRequest,
     TransferDeliverConfirmRequest, TransferEscalateRequest, SendMessageRequest,
     AcknowledgeMessageRequest, StockReceivedRequest, StockConsumedRequest, StockDispensedRequest,
-    FederatedTrainRequest, ModelEvaluationRequest, FhirExportRequest
+    FederatedTrainRequest, ModelEvaluationRequest, FhirExportRequest, DemoResetRequest
 )
 from backend.forecasting import forecast_demand_linear_regression
 from backend.redistribution import generate_redistribution_recommendations
@@ -44,9 +44,12 @@ app = FastAPI(
     description="Enterprise RBAC Health Supply Chain Platform with 3-tier hierarchy, strict database-level data isolation, audit logging, and NumPy linear demand forecasting."
 )
 
+cors_env = os.environ.get("ALLOWED_ORIGINS", "*")
+allowed_origins = [o.strip() for o in cors_env.split(",") if o.strip()] if cors_env != "*" else ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -63,10 +66,12 @@ def login_endpoint(req: LoginRequest, request: Request, response: Response):
     res = authenticate_user(req.username, req.password, client_ip=client_ip, remember_me=req.remember_me)
     
     max_age = 7 * 86400 if req.remember_me else 86400
+    secure_cookie = os.environ.get("SECURE_COOKIES", "false").lower() in ("true", "1", "yes")
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=res["session_id"],
         httponly=True,
+        secure=secure_cookie,
         samesite="lax",
         max_age=max_age,
         path="/"
@@ -106,6 +111,68 @@ def logout_endpoint(
 def get_demo_mode_status():
     is_demo = os.environ.get("DEMO_MODE", "true").lower() in ("true", "1", "yes")
     return {"demo_mode": is_demo}
+
+
+@app.get("/api/health", tags=["System Health"])
+def get_health_status():
+    """
+    Non-sensitive system health check for load balancers and container orchestrators.
+    Reports only operational status, database connectivity, and application version.
+    """
+    db_connected = False
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1")
+        row = cursor.fetchone()
+        if row and row[0] == 1:
+            db_connected = True
+        conn.close()
+    except Exception:
+        db_connected = False
+
+    return {
+        "status": "healthy" if db_connected else "degraded",
+        "database": "connected" if db_connected else "disconnected",
+        "version": "2.0.0",
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@app.post("/api/admin/demo-reset", tags=["0. Authentication"])
+def reset_demo_data_endpoint(
+    req: DemoResetRequest,
+    current_user: Dict[str, Any] = Depends(require_roles(["NATIONAL_ADMIN"]))
+):
+    """
+    Authorised demo-data reset mechanism for hackathon evaluations.
+    Works only when DEMO_MODE=true and requires National Admin privileges with explicit confirmation.
+    """
+    is_demo = os.environ.get("DEMO_MODE", "true").lower() in ("true", "1", "yes")
+    if not is_demo:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Demo reset endpoint is disabled when DEMO_MODE is false."
+        )
+
+    if not req.confirm:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Demo reset requires explicit confirmation: {'confirm': true}."
+        )
+
+    try:
+        result = reset_demo_data(caller_info=current_user)
+        return {
+            "status": "success",
+            "message": result["message"],
+            "timestamp": result["timestamp"]
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to reset demonstration dataset: {str(e)}"
+        )
 
 
 @app.get("/api/auth/me", tags=["0. Authentication"])

@@ -2502,6 +2502,38 @@ body {
     outline: none;
 }
 
+.demo-environment-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 0.725rem;
+    font-weight: 600;
+    background: #F8FAFC;
+    border: 1px solid #CBD5E1;
+    color: #334155;
+    letter-spacing: 0.02em;
+    user-select: none;
+    transition: all 0.2s ease;
+}
+
+.demo-environment-badge .demo-badge-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #0284C7;
+    display: inline-block;
+    box-shadow: 0 0 0 2px rgba(2, 132, 199, 0.25);
+    animation: demo-dot-pulse 2.5s infinite;
+}
+
+@keyframes demo-dot-pulse {
+    0% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.15); opacity: 0.8; }
+    100% { transform: scale(1); opacity: 1; }
+}
+
 .discipline-chip {
     display: flex;
     align-items: center;

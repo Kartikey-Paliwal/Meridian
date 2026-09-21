@@ -251,5 +251,9 @@ class FhirExportRequest(BaseModel):
     date_to: Optional[str] = None
 
 
+class DemoResetRequest(BaseModel):
+    confirm: bool = Field(False, description="Explicit confirmation to reset demo records back to initial baseline")
+
+
 
 
